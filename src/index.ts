@@ -86,9 +86,49 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
 }
 
 /**
+ * Recursively read all files in a directory, ignoring node_modules/.git/etc.
+ */
+function readDirectoryRecursive(dir: string, basePath = ""): { relativePath: string; content: string; langHint: string }[] {
+  const files: { relativePath: string; content: string; langHint: string }[] = [];
+  const SKIP_DIRS = new Set(["node_modules", ".git", ".svn", ".hg", "dist", "build", "__pycache__", ".DS_Store"]);
+
+  let entries: string[];
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true })
+      .filter((e) => !e.name.startsWith(".") || e.name === ".env")
+      .map((e) => e.name);
+  } catch {
+    return [];
+  }
+
+  for (const entry of entries.sort()) {
+    const fullPath = path.join(dir, entry);
+    const relativePath = basePath ? `${basePath}/${entry}` : entry;
+
+    try {
+      const stat = fs.statSync(fullPath);
+      if (stat.isDirectory()) {
+        if (SKIP_DIRS.has(entry)) continue;
+        files.push(...readDirectoryRecursive(fullPath, relativePath));
+      } else if (stat.isFile()) {
+        try {
+          const content = fs.readFileSync(fullPath, "utf-8");
+          const ext = path.extname(entry).slice(1).toLowerCase();
+          files.push({ relativePath, content, langHint: ext || "text" });
+        } catch {
+          // skip unreadable files
+        }
+      }
+    } catch {
+      // skip inaccessible entries
+    }
+  }
+  return files;
+}
+
+/**
  * Parse @file references in user input and replace them with file content.
- * Supports: @path/to/file (relative or absolute)
- * Returns processed message with file contents embedded.
+ * Supports: @path/to/file, @path/to/directory
  */
 async function expandFileAttachments(input: string): Promise<string> {
   const fileRegex = /@(\S+)/g;
@@ -103,15 +143,31 @@ async function expandFileAttachments(input: string): Promise<string> {
     const fullPath = path.isAbsolute(filePath) ? filePath : path.join(process.cwd(), filePath);
 
     try {
-      const content = fs.readFileSync(fullPath, "utf-8");
-      const ext = path.extname(filePath).slice(1).toLowerCase();
-      const langHint = ext || "text";
-      fileContents.push(`--- File: ${filePath} ---\n\`\`\`${langHint}\n${content}\n\`\`\`\n--- End of ${filePath} ---`);
-      result = result.replace(match[0], `[File: ${filePath}]`);
+      const stat = fs.statSync(fullPath);
+
+      if (stat.isDirectory()) {
+        // Directory: read all files recursively
+        const dirFiles = readDirectoryRecursive(fullPath, filePath);
+        if (dirFiles.length === 0) {
+          fileContents.push(`--- Directory: ${filePath} (empty or no readable files) ---`);
+        } else {
+          for (const f of dirFiles) {
+            fileContents.push(`--- File: ${f.relativePath} ---\n\`\`\`${f.langHint}\n${f.content}\n\`\`\`\n--- End of ${f.relativePath} ---`);
+          }
+        }
+        result = result.replace(match[0], `[Directory: ${filePath} (${dirFiles.length} files)]`);
+      } else {
+        // Single file
+        const content = fs.readFileSync(fullPath, "utf-8");
+        const ext = path.extname(filePath).slice(1).toLowerCase();
+        const langHint = ext || "text";
+        fileContents.push(`--- File: ${filePath} ---\n\`\`\`${langHint}\n${content}\n\`\`\`\n--- End of ${filePath} ---`);
+        result = result.replace(match[0], `[File: ${filePath}]`);
+      }
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
-      fileContents.push(`--- File: ${filePath} (ERROR: ${errMsg}) ---`);
-      result = result.replace(match[0], `[File: ${filePath} - NOT FOUND]`);
+      fileContents.push(`--- ${filePath} (ERROR: ${errMsg}) ---`);
+      result = result.replace(match[0], `[${filePath} - NOT FOUND]`);
     }
   }
 
