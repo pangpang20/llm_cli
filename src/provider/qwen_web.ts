@@ -1,6 +1,5 @@
 import * as https from "https";
 import { Cookie } from "puppeteer";
-import { Tool } from "../tools/types";
 
 // Qwen web chat internal API endpoint
 const CHAT_API_URL = "https://chat.qwen.ai/api/chat";
@@ -8,6 +7,11 @@ const CHAT_API_URL = "https://chat.qwen.ai/api/chat";
 export interface QwenMessage {
   role: "system" | "user" | "assistant";
   content: string;
+}
+
+export interface QwenChatResponse {
+  content: string;
+  sessionId?: string;
 }
 
 export interface ProviderConfig {
@@ -33,7 +37,7 @@ export class QwenWebProvider {
     };
   }
 
-  private async fetch(url: string, options: { method: string; headers: Record<string, string>; body?: string }): Promise<any> {
+  private async fetch(url: string, options: { method: string; headers: Record<string, string>; body?: string }): Promise<Record<string, unknown>> {
     return new Promise((resolve, reject) => {
       const parsedUrl = new URL(url);
       const req = https.request(
@@ -50,7 +54,7 @@ export class QwenWebProvider {
           res.on("data", (chunk) => (data += chunk));
           res.on("end", () => {
             try {
-              resolve(JSON.parse(data));
+              resolve(JSON.parse(data) as Record<string, unknown>);
             } catch {
               reject(new Error(`Failed to parse response: ${data.slice(0, 500)}`));
             }
@@ -70,7 +74,19 @@ export class QwenWebProvider {
       .join("\n\n");
   }
 
-  async chat(messages: QwenMessage[], tools: Tool[]): Promise<{ content: string }> {
+  private extractContent(response: Record<string, unknown>): string {
+    // Qwen web API response structure may vary; try known fields
+    if (typeof response.content === "string") return response.content;
+    if (typeof response.message === "string") return response.message;
+    if (typeof response.text === "string") return response.text;
+    if (typeof response.data === "object" && response.data !== null) {
+      const data = response.data as Record<string, unknown>;
+      if (typeof data.content === "string") return data.content;
+    }
+    return JSON.stringify(response);
+  }
+
+  async chat(messages: QwenMessage[]): Promise<QwenChatResponse> {
     const conversationText = this.formatConversation(messages);
 
     const body = JSON.stringify({
@@ -78,7 +94,7 @@ export class QwenWebProvider {
       sessionId: this.sessionId,
     });
 
-    let response: any;
+    let response: Record<string, unknown>;
     try {
       response = await this.fetch(CHAT_API_URL, {
         method: "POST",
@@ -92,11 +108,13 @@ export class QwenWebProvider {
       );
     }
 
-    if (response.sessionId) {
+    if (typeof response.sessionId === "string") {
       this.sessionId = response.sessionId;
     }
 
-    const content = response.content || response.message || response.text || JSON.stringify(response);
-    return { content };
+    return {
+      content: this.extractContent(response),
+      sessionId: this.sessionId ?? undefined,
+    };
   }
 }

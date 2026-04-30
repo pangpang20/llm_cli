@@ -24,5 +24,17 @@ export const allTools: Tool[] = [
   browserTypeTool,
 ];
 
+export {
+  readFileTool,
+  writeFileTool,
+  editFileTool,
+  bashTool,
+  browserNavigateTool,
+  browserScreenshotTool,
+  browserTextTool,
+  browserClickTool,
+  browserTypeTool,
+  cleanupBrowser,
+};
+
 export type { Tool, ToolCall } from "./types";
-export { cleanupBrowser };

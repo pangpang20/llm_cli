@@ -2,22 +2,32 @@
 
 一个类似 Claude Code 的命令行 AI 助手工具。通过浏览器登录 Qwen 账号即可在终端中与 AI 对话，AI 可以自动调用工具完成文件读写、Shell 命令执行、浏览器操作等任务。
 
+## 工作原理
+
+```
+终端输入 ──> 认证 Cookie ──> Qwen 网页 API ──> AI 回复 ──> 工具执行
+```
+
+1. 首次运行自动打开浏览器，扫码登录 [chat.qwen.ai](https://chat.qwen.ai/)
+2. 登录成功后提取 Cookie 保存到本地
+3. 后续通过 Cookie 调用 Qwen 网页内部 API，无需 API Key
+
 ## 功能特性
 
 - **浏览器登录** — 打开浏览器扫码登录，自动获取认证信息
 - **交互式 REPL** — 在终端中与 AI 自由对话
-- **文件操作** — 读取、创建、编辑文件
+- **文件操作** — 读取、创建、编辑文件，路径限制在项目目录内
 - **Shell 命令** — 执行任意终端命令
 - **浏览器自动化** — 打开网页、截图、提取文本、点击、输入
-- **多轮工具链** — AI 可以连续调用多个工具完成复杂任务
+- **会话持久化** — Cookie 保存 12 小时，无需重复登录
 
 ## 工具列表
 
 | 工具 | 说明 |
 |------|------|
-| `read_file` | 读取文件内容 |
-| `write_file` | 创建或覆盖文件 |
-| `edit_file` | 精确文本替换 |
+| `read_file` | 读取文件内容（限制在项目目录） |
+| `write_file` | 创建或覆盖文件（限制在项目目录） |
+| `edit_file` | 精确文本替换（限制在项目目录） |
 | `bash` | 执行 Shell 命令 |
 | `browser_navigate` | 打开指定 URL |
 | `browser_screenshot` | 对当前页面截图 |
@@ -41,19 +51,20 @@ npm run build
 
 ## 使用
 
-### 1. 登录认证
-
-首次运行无需配置 API Key，工具会自动打开浏览器让你登录：
+### 1. 启动 & 登录
 
 ```bash
 npm start
 ```
 
-运行后会：
-1. 自动弹出浏览器窗口
-2. 打开 [chat.qwen.ai](https://chat.qwen.ai/)
-3. 你扫码或输入账号密码登录
-4. 登录成功后浏览器自动关闭，认证信息保存到本地
+首次运行会自动打开浏览器：
+
+1. 弹出浏览器窗口，打开 [chat.qwen.ai](https://chat.qwen.ai/)
+2. 扫码或输入账号密码登录
+3. 登录成功后浏览器自动关闭，认证信息保存到 `.qwen_session.json`
+4. 进入终端对话界面
+
+之后 12 小时内再次运行无需登录。
 
 ### 2. 开始对话
 
@@ -64,7 +75,7 @@ Type /help for commands. Ctrl+C to exit.
 > 帮我创建一个 Hello World 的 Python 脚本
 ```
 
-AI 会自动调用 `write_file` 工具创建文件。
+AI 会直接调用工具完成任务，无需手动操作。
 
 ### 3. 内置命令
 
@@ -77,10 +88,12 @@ AI 会自动调用 `write_file` 工具创建文件。
 
 ### 4. 会话管理
 
-认证信息保存在 `.qwen_session.json` 文件中，有效期为 12 小时。过期后会自动重新登录。
+| 文件 | 说明 |
+|------|------|
+| `.qwen_session.json` | 认证 Cookie，12 小时过期 |
 
 ```bash
-# 手动删除会话文件强制重新登录
+# 强制重新登录
 rm .qwen_session.json
 npm start
 ```
@@ -89,7 +102,7 @@ npm start
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
-| `NO_SANDBOX` | `0` | 设为 `1` 时禁用浏览器沙箱（Docker/CI 环境需要） |
+| `NO_SANDBOX` | `0` | 设为 `1` 时禁用浏览器沙箱（Docker/CI 环境） |
 
 ## 开发
 
@@ -110,16 +123,16 @@ npm run lint
 src/
   index.ts              - REPL 主循环入口
   auth.ts               - 浏览器登录 & 会话管理
-  chat.ts               - 对话历史管理（已废弃，使用内联数组）
+  chat.ts               - 对话历史管理（OpenAI 类型兼容层，备用）
   provider/
     dashscope.ts        - DashScope API 封装（备用）
     qwen_web.ts         - Qwen 网页版 API 封装
   tools/
     types.ts            - 工具接口定义
-    read.ts             - 文件读取工具
-    write.ts            - 文件写入工具
-    edit.ts             - 文件编辑工具
-    bash.ts             - Shell 命令工具
-    browser.ts          - 浏览器自动化工具集
+    read.ts             - 文件读取
+    write.ts            - 文件写入
+    edit.ts             - 文件编辑
+    bash.ts             - Shell 命令
+    browser.ts          - 浏览器自动化（导航/截图/文本/点击/输入）
     index.ts            - 工具注册导出
 ```

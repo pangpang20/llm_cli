@@ -2,52 +2,30 @@ import * as readline from "readline";
 import chalk from "chalk";
 import { ensureAuth } from "./auth";
 import { QwenWebProvider, QwenMessage } from "./provider/qwen_web";
-import { allTools, cleanupBrowser } from "./tools";
-import { Tool } from "./tools/types";
+import { cleanupBrowser } from "./tools";
 
 const SYSTEM_PROMPT = `You are a helpful AI assistant running in a terminal. You can help users with coding tasks, file operations, shell commands, and browsing the web.
 
-You have access to the following tools:
+When the user asks you to perform file operations, shell commands, or browser actions, use the following tool call format in your response:
 
-1. read_file: Read the contents of a file
-   - file_path (string): Path to the file
+[TOOL_CALL:tool_name(arg1="value1", arg2="value2")]
 
-2. write_file: Write content to a file (creates parent directories if needed)
-   - file_path (string): Path to the file
-   - content (string): Content to write
-
-3. edit_file: Edit a file by replacing exact text
-   - file_path (string): Path to the file
-   - old_string (string): Exact text to find and replace
-   - new_string (string): New text to replace with
-
-4. bash: Execute a shell command
-   - command (string): The shell command to execute
-   - timeout (number, optional): Timeout in ms (default: 30000)
-
-5. browser_navigate: Navigate to a URL in headless browser
-   - url (string): URL to navigate to
-
-6. browser_screenshot: Take a screenshot
-   - path (string, optional): File path to save screenshot (default: screenshot.png)
-   - selector (string, optional): CSS selector of element to screenshot
-
-7. browser_text: Extract text from the current page
-   - selector (string, optional): CSS selector to extract text from
-
-8. browser_click: Click an element
-   - selector (string): CSS selector of element to click
-
-9. browser_type: Type text into an input field
-   - selector (string): CSS selector of the input element
-   - text (string): Text to type
+Available tools:
+- read_file(file_path="path") — Read file contents
+- write_file(file_path="path", content="content") — Create or overwrite a file
+- edit_file(file_path="path", old_string="old", new_string="new") — Replace exact text in a file
+- bash(command="cmd", timeout=30000) — Execute a shell command
+- browser_navigate(url="url") — Open a URL in headless browser
+- browser_screenshot(path="file.png") — Take a screenshot
+- browser_text(selector="css") — Extract text from page
+- browser_click(selector="css") — Click an element
+- browser_type(selector="css", text="text") — Type into an input
 
 Guidelines:
-- Always use tools to accomplish tasks. Don't just describe what to do — actually do it.
-- When reading files, use read_file. When creating/modifying files, use write_file or edit_file.
-- For shell operations, use bash. For web browsing, use browser_* tools.
-- Use tools one at a time. Wait for the result before using the next tool.
-- Be concise in your responses. Show diffs or results clearly.`;
+- When you need to use a tool, respond with ONLY the tool call first. The system will execute it and send back the result.
+- After receiving a tool result, use it to continue helping the user.
+- If multiple tools are needed, use them one at a time in sequence.
+- Be concise. Show results clearly.`;
 
 function createUI() {
   const rl = readline.createInterface({
@@ -74,26 +52,58 @@ function createUI() {
   };
 }
 
-function printToolCall(name: string, args: Record<string, unknown>) {
-  const cmd = args.command ? String(args.command).slice(0, 100) : "";
-  const label = name === "bash" ? chalk.yellow(`  bash: ${cmd}`) : chalk.blue(`  ${name}`);
-  console.log(label);
+// Parse tool call from LLM response: [TOOL_CALL:name(arg="val")]
+function parseToolCall(text: string): { name: string; args: Record<string, unknown> } | null {
+  const match = text.match(/\[TOOL_CALL:(\w+)\(([^)]*)\)\]/);
+  if (!match) return null;
+
+  const name = match[1];
+  const argsStr = match[2];
+  const args: Record<string, unknown> = {};
+
+  if (argsStr.trim()) {
+    const pairs = argsStr.matchAll(/(\w+)="([^"]*)"/g);
+    for (const [, key, value] of pairs) {
+      args[key] = value;
+    }
+  }
+
+  return { name, args };
 }
 
-function printToolResult(result: string) {
-  const preview = result.slice(0, 300);
-  console.log(chalk.green(`  -> ${preview}${result.length > 300 ? "..." : ""}`));
-  console.log();
-}
+async function executeTool(name: string, args: Record<string, unknown>): Promise<string> {
+  console.log(chalk.blue(`  [tool: ${name}]`));
 
-function getToolByName(name: string): Tool | undefined {
-  return allTools.find((t) => t.name === name);
+  const { readFileTool, writeFileTool, editFileTool, bashTool,
+    browserNavigateTool, browserScreenshotTool, browserTextTool,
+    browserClickTool, browserTypeTool
+  } = await import("./tools");
+
+  const tools: Record<string, { execute: (args: Record<string, unknown>) => Promise<string> }> = {
+    read_file: readFileTool,
+    write_file: writeFileTool,
+    edit_file: editFileTool,
+    bash: bashTool,
+    browser_navigate: browserNavigateTool,
+    browser_screenshot: browserScreenshotTool,
+    browser_text: browserTextTool,
+    browser_click: browserClickTool,
+    browser_type: browserTypeTool,
+  };
+
+  const tool = tools[name];
+  if (!tool) return `Error: Unknown tool "${name}"`;
+
+  try {
+    return await tool.execute(args);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return `Error: ${message}`;
+  }
 }
 
 async function main() {
-  // Authenticate via browser login
   const cookies = await ensureAuth();
-
   const provider = new QwenWebProvider({ cookies });
 
   const chatHistory: QwenMessage[] = [
@@ -125,10 +135,7 @@ async function main() {
       continue;
     }
     if (trimmed === "/login") {
-      // Force re-login
-      const { ensureAuth: reAuth } = await import("./auth");
-      const newCookies = await reAuth();
-      // Can't replace provider instance easily, just notify
+      await ensureAuth();
       console.log(chalk.green("Session refreshed. New authentication saved.\n"));
       continue;
     }
@@ -142,18 +149,40 @@ async function main() {
       continue;
     }
 
-    // Add user message
     chatHistory.push({ role: "user", content: trimmed });
 
-    // Send to LLM
-    try {
-      console.log(chalk.gray("  thinking..."));
-      const response = await provider.chat(chatHistory, allTools);
-      console.log(chalk.white(response.content) + "\n");
-      chatHistory.push({ role: "assistant", content: response.content });
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      console.error(chalk.red(`Error: ${message}`));
+    let maxToolRounds = 10; // Prevent infinite tool call loops
+    while (maxToolRounds > 0) {
+      try {
+        console.log(chalk.gray("  thinking..."));
+        const response = await provider.chat(chatHistory);
+        const content = response.content.trim();
+
+        // Check for tool call
+        const toolCall = parseToolCall(content);
+        if (toolCall) {
+          console.log(chalk.blue(`  [tool: ${toolCall.name}]`));
+          const result = await executeTool(toolCall.name, toolCall.args);
+          console.log(chalk.green(`  -> ${result.slice(0, 200)}${result.length > 200 ? "..." : ""}\n`));
+
+          chatHistory.push({ role: "assistant", content });
+          chatHistory.push({ role: "user", content: `Tool result: ${result}\n\nContinue with the result.` });
+          maxToolRounds--;
+        } else {
+          // Regular text response
+          console.log(chalk.white(content) + "\n");
+          chatHistory.push({ role: "assistant", content });
+          break;
+        }
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error(chalk.red(`Error: ${message}`));
+        break;
+      }
+    }
+
+    if (maxToolRounds === 0) {
+      console.log(chalk.yellow("  Tool call limit reached. Stopping.\n"));
     }
   }
 
