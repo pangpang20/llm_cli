@@ -1,3 +1,4 @@
+import { renderBase64Image } from "../utils/renderImage";
 import puppeteer, { Browser, Cookie } from "puppeteer";
 import * as fs from "fs";
 import * as path from "path";
@@ -136,10 +137,14 @@ export abstract class BaseProvider {
 
       // Take screenshot of login page
       const screenshot = await page.screenshot({ encoding: "base64" });
-      console.log(chalk.yellow("\nLogin page screenshot (base64):"));
-      console.log(screenshot.slice(0, 200) + "...");
-      console.log(chalk.yellow("Save this base64 string, decode it on your machine to see the QR code/login form."));
-      console.log(chalk.yellow("After scanning/entering credentials, press Enter to continue...\n"));
+      console.log(chalk.yellow("\nScan the QR code below to log in:\n"));
+
+      // Enable VT mode on Windows for ANSI rendering
+      if (process.platform === "win32") {
+        try { process.stdout.write("\x1b[?25l\x1b[?25h"); } catch { /* ignore */ }
+      }
+
+      await renderBase64Image(screenshot);
 
       const rl = readline.createInterface({ input: process.stdin });
       await new Promise<void>((resolve) => {
