@@ -28,31 +28,24 @@ CRITICAL: You have access to LOCAL TOOLS. You MUST use them for any file operati
 
 When you need to use a tool, respond with ONLY the tool call in this EXACT format (no other text):
 
-[TOOL_CALL:TOOLNAME(arg1="value1", arg2="value2")]
+[TOOL_CALL:tool_name_with_params_here]
 
 Available tools:
-- bash(command="your shell command", timeout=30000) — Execute a shell command
-- read_file(file_path="/path/to/file") — Read file contents
-- write_file(file_path="/path/to/file", content="file content here") — Create or overwrite a file
-- edit_file(file_path="/path/to/file", old_string="text to find", new_string="replacement text") — Replace exact text in a file
-- browser_navigate(url="https://...") — Open a URL in headless browser
-- browser_screenshot(path="/path/to/screenshot.png") — Take a screenshot
-- browser_text(selector="css selector") — Extract text from page
-- browser_click(selector="css selector") — Click an element
-- browser_type(selector="css selector", text="typed text") — Type into an input
+- bash: run shell commands. Example: [TOOL_CALL:bash(command="ls -la", timeout=30000)]
+- read_file: read a file. Example: [TOOL_CALL:read_file(file_path="README.md")]
+- write_file: create or overwrite a file. Example: [TOOL_CALL:write_file(file_path="test.txt", content="hello")]
+- edit_file: replace text in a file. Example: [TOOL_CALL:edit_file(file_path="main.py", old_string="old", new_string="new")]
+- browser_navigate: open a URL. Example: [TOOL_CALL:browser_navigate(url="https://example.com")]
+- browser_screenshot: take screenshot. Example: [TOOL_CALL:browser_screenshot(path="snap.png")]
+- browser_text: extract text. Example: [TOOL_CALL:browser_text(selector="body")]
+- browser_click: click element. Example: [TOOL_CALL:browser_click(selector="#btn")]
+- browser_type: type into input. Example: [TOOL_CALL:browser_type(selector="#input", text="hello")]
 
 Guidelines:
-- When you need to use a tool, respond with ONLY the tool call first. The system will execute it and send back the result.
+- When you need to use a tool, respond with ONLY the [TOOL_CALL:...] line. The system will execute it and send back the result.
 - After receiving a tool result, use it to continue helping the user.
 - If multiple tools are needed, use them one at a time in sequence.
-- Be concise. Show results clearly.
-- IMPORTANT: Replace "TOOLNAME" with one of the actual tool names listed above (bash, read_file, write_file, edit_file, browser_navigate, browser_screenshot, browser_text, browser_click, browser_type). Do NOT use "TOOLNAME" or "tool_name" literally.
-
-EXAMPLES:
-[TOOL_CALL:bash(command="ls -la", timeout=30000)]
-[TOOL_CALL:read_file(file_path="README.md")]
-[TOOL_CALL:edit_file(file_path="src/main.py", old_string="def old():", new_string="def new():")]
-[TOOL_CALL:write_file(file_path="test.txt", content="hello world")]`;
+- Be concise. Show results clearly.`;
 
 const TOOL_REGISTRY: Record<string, { execute: (args: Record<string, unknown>) => Promise<string> }> = {
   read_file: readFileTool,

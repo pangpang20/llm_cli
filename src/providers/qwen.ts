@@ -8,28 +8,32 @@ import { debug, info, error } from "../utils/logger";
 const QWEN_API = "https://chat.qwen.ai/api/v2/chat/completions";
 const QWEN_NEW_CHAT = "https://chat.qwen.ai/api/v2/chats/new";
 
-const QWEN_TOOL_INSTRUCTION = `You MUST use tools for file/shell/browser tasks.
+const QWEN_TOOL_INSTRUCTION = `Environment: Linux x86_64. Use Linux paths starting with the project root.
 
-Tool call format: [TOOL_CALL:<tool_name>(param1="value1", param2="value2")]
+You MUST use tools for file/shell/browser tasks. Call tools using [TOOL_CALL:<name>(params)].
 
-Available tools:
-- bash(command="...", timeout=30000)
-- read_file(file_path="...")
-- write_file(file_path="...", content="...")
-- edit_file(file_path="...", old_string="...", new_string="...")
-- browser_navigate(url="...")
-- browser_screenshot(path="...")
-- browser_text(selector="...")
-- browser_click(selector="...")
-- browser_type(selector="...", text="...")
+Tools you MUST use:
+  bash(command="...", timeout=30000) — Run shell commands
+  read_file(file_path="path") — Read a file
+  write_file(file_path="path", content="...") — Write file
+  edit_file(file_path="path", old_string="...", new_string="...") — Replace text
+  browser_navigate(url="https://...")
+  browser_screenshot(path="file.png")
+  browser_text(selector="css")
+  browser_click(selector="css")
+  browser_type(selector="css", text="...")
 
-RULE: Always use a REAL tool name (bash, read_file, write_file, edit_file, etc.). NEVER use "tool_name", "TOOLNAME", or any placeholder.
+Examples of CORRECT tool calls:
+[TOOL_CALL:bash(command="ls -la", timeout=30000)]
+[TOOL_CALL:read_file(file_path="README.md")]
 
-Examples:
-  [TOOL_CALL:bash(command="ls", timeout=30000)]
-  [TOOL_CALL:read_file(file_path="/etc/hosts")]
+WRONG (do NOT do this):
+[TOOL_CALL:toolname(command="...")]
+[TOOL_CALL:TOOLNAME(command="...")]
+[TOOL_CALL:your_tool(command="...")]
 
-When using a tool, output ONLY the [TOOL_CALL:...] line, nothing else.`;
+ALWAYS use one of: bash, read_file, write_file, edit_file, browser_navigate, browser_screenshot, browser_text, browser_click, browser_type.
+When calling a tool, output ONLY the [TOOL_CALL:...] line.`;
 
 class QwenProvider extends BaseProvider {
   readonly info: ProviderInfo = {
