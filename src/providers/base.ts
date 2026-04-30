@@ -1,4 +1,3 @@
-import { renderBase64Image } from "../utils/renderImage";
 import puppeteer, { Browser, Cookie } from "puppeteer";
 import * as fs from "fs";
 import * as path from "path";
@@ -160,8 +159,7 @@ export abstract class BaseProvider {
   }
 
   /**
-   * Headless login: take screenshots and show them in terminal
-   * User scans QR code from terminal or enters credentials
+   * Headless login: show URL and wait for user to complete login in their own browser
    */
   async loginWithScreenshot(): Promise<Cookie[]> {
     const browser = await this.launchBrowser();
@@ -172,19 +170,8 @@ export abstract class BaseProvider {
       await page.goto(this.info.loginUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
 
       // Show the login URL for users to open in their browser
-      console.log(chalk.cyan(`\nOpen this URL in your browser to log in:\n`));
+      console.log(chalk.cyan(`\nOpen this URL in your browser to log in:`));
       console.log(chalk.white(`  ${this.info.loginUrl}\n`));
-
-      // Take screenshot of login page
-      const screenshot = await page.screenshot({ encoding: "base64" });
-      console.log(chalk.yellow("Scan the QR code below to log in:\n"));
-
-      // Enable VT mode on Windows for ANSI rendering
-      if (process.platform === "win32") {
-        try { process.stdout.write("\x1b[?25l\x1b[?25h"); } catch { /* ignore */ }
-      }
-
-      await renderBase64Image(screenshot);
 
       const rl = readline.createInterface({ input: process.stdin });
       await new Promise<void>((resolve) => {
