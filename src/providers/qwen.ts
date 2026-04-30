@@ -1,7 +1,6 @@
 import * as https from "https";
 import { Cookie } from "puppeteer";
 import { BaseProvider, ChatMessage, ChatResponse, ProviderInfo } from "./base";
-import * as readline from "readline";
 import chalk from "chalk";
 import { debug, info, error } from "../utils/logger";
 
@@ -56,7 +55,7 @@ class QwenProvider extends BaseProvider {
     const isWindows = process.platform === "win32";
 
     if (!hasDisplay || isWindows) {
-      console.log(chalk.yellow(isWindows ? "Windows detected. Opening system browser." : "No display detected. Using headless mode."));
+      console.log(chalk.yellow(isWindows ? "Windows detected. Opening visible browser for login." : "No display detected. Opening visible browser for login."));
       return this.loginWithBrowser();
     }
 
@@ -65,69 +64,69 @@ class QwenProvider extends BaseProvider {
   }
 
   /**
-   * Login by opening system browser and waiting for user to complete login
+   * Login by opening a visible browser and waiting for user to complete login
+   * Uses a single browser instance so cookies are properly captured
    */
   async loginWithBrowser(): Promise<Cookie[]> {
     const puppeteer = await import("puppeteer");
-    const { renderBase64Image } = await import("../utils/renderImage");
+    const os = await import("os");
+    const path = await import("path");
+    const fs = await import("fs");
 
-    // Try to open system browser first
-    const browserOpened = await this.openInBrowser(this.info.loginUrl);
-    if (browserOpened) {
-      console.log(chalk.green(`Opened ${this.info.loginUrl} in your browser.`));
-      console.log(chalk.gray("Please complete login in the browser window.\n"));
-    }
+    // Create a temporary user data directory so the browser behaves like a normal instance
+    const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "qwen-login-"));
 
-    // Also launch headless browser to capture cookies
+    // Launch a visible browser (non-headless) so the user can interact with the login page
     const browser = await puppeteer.launch({
-      headless: true,
+      headless: false,
+      userDataDir,
       args: ["--no-sandbox", "--disable-setuid-sandbox"],
     });
 
     try {
       const page = await browser.newPage();
       await page.setViewport({ width: 1280, height: 800 });
-      await page.goto(this.info.loginUrl, { waitUntil: "networkidle0", timeout: 60000 });
+      await page.goto(this.info.loginUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
 
-      // Wait a bit for page to load
-      await new Promise(r => setTimeout(r, 2000));
+      console.log(chalk.green(`Opened ${this.info.loginUrl} in your browser.`));
+      console.log(chalk.gray("Please complete login in the browser window.\n"));
 
-      // Take screenshot for fallback
-      const screenshot = await page.screenshot({ encoding: "base64" });
+      // Wait for login to complete with a 5-minute timeout
+      const loginComplete = await page.waitForFunction(
+        this.isLoginComplete(),
+        { timeout: 300000, polling: 1000 }
+      ).then(() => true).catch(() => false);
 
-      if (!browserOpened) {
-        console.log(chalk.yellow("\nFailed to open system browser. Showing QR code instead:\n"));
-        await renderBase64Image(screenshot);
-      } else {
-        console.log(chalk.cyan(`Or scan the QR code below if needed:\n`));
-        await renderBase64Image(screenshot);
+      if (!loginComplete) {
+        throw new Error(
+          "Login timed out after 5 minutes. Please try again.\n" +
+          "Press Ctrl+C to cancel, then re-run and select your provider."
+        );
       }
 
-      // Wait for user to complete login
-      const answer = await new Promise<string>((resolve) => {
-        const rl = readline.createInterface({ input: process.stdin });
-        rl.question("Press Enter after logging in: ", (ans) => {
-          rl.close();
-          resolve(ans);
-        });
-      });
-
+      // Give the page a moment to finish any post-login redirects
       await new Promise((r) => setTimeout(r, 3000));
 
       const cookies = await page.cookies();
       const authCookies = this.extractAuthCookies(cookies);
 
       await browser.close();
+      // Clean up temp directory
+      try { fs.rmSync(userDataDir, { recursive: true, force: true }); } catch { /* ignore */ }
 
       if (authCookies.length > 0) {
         this.saveSession(authCookies);
         console.log(chalk.green("Login successful!\n"));
         return authCookies;
       } else {
-        throw new Error("Login completed but no auth cookies found.");
+        throw new Error(
+          "Login appeared to complete but no auth cookies were found.\n" +
+          "This may mean the login page changed. Please try again."
+        );
       }
     } catch (err) {
       try { await browser.close(); } catch { /* ignore */ }
+      try { fs.rmSync(userDataDir, { recursive: true, force: true }); } catch { /* ignore */ }
       throw new Error(`Login failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   }

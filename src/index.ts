@@ -153,10 +153,34 @@ async function main() {
   info("Trust check passed");
 
   // Select provider
-  const provider: BaseProvider = await selectProvider();
+  let provider: BaseProvider = await selectProvider();
 
-  // Login
-  await provider.login();
+  // Login with retry on failure
+  while (true) {
+    try {
+      await provider.login();
+      break; // Login succeeded
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(chalk.red(`\nLogin failed: ${message}\n`));
+
+      const ui = createUI();
+      const choice = await ui.prompt(
+        chalk.yellow("Choose an option: [1] Retry login, [2] Switch provider, [3] Exit [1/2/3]: ")
+      ).then(c => c.trim());
+      ui.close();
+
+      if (choice === "3") {
+        info("User chose to exit after login failure");
+        closeLogger();
+        process.exit(1);
+      } else if (choice === "2") {
+        provider = await selectProvider();
+        // Fall through to retry with new provider
+      }
+      // choice === "1" or anything else: retry with current provider
+    }
+  }
 
   // Init harness
   const harness = new Harness();

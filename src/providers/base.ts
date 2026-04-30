@@ -34,10 +34,22 @@ export abstract class BaseProvider {
   protected async openInBrowser(url: string): Promise<boolean> {
     try {
       const platform = os.platform();
-      const cmd = platform === "win32" ? "start" : platform === "darwin" ? "open" : "xdg-open";
       const { exec } = await import("child_process");
+      let cmd: string;
+      let options: { shell?: string } = {};
+
+      if (platform === "win32") {
+        // Use cmd.exe /c start with an empty title string so Windows opens the default browser
+        cmd = `cmd.exe /c start "" "${url}"`;
+        options.shell = "cmd.exe";
+      } else if (platform === "darwin") {
+        cmd = `open "${url}"`;
+      } else {
+        cmd = `xdg-open "${url}"`;
+      }
+
       return new Promise((resolve) => {
-        exec(`${cmd} "${url}"`, (err) => {
+        exec(cmd, options, (err) => {
           if (err) {
             console.log(chalk.gray(`Failed to open browser: ${err.message}`));
             resolve(false);
