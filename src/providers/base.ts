@@ -3,6 +3,7 @@ import puppeteer, { Browser, Cookie } from "puppeteer";
 import * as fs from "fs";
 import * as path from "path";
 import * as readline from "readline";
+import * as os from "os";
 import chalk from "chalk";
 
 export interface ChatMessage {
@@ -26,6 +27,29 @@ export abstract class BaseProvider {
   abstract readonly info: ProviderInfo;
   protected sessionId: string | null = null;
   protected cookieString: string = "";
+
+  /**
+   * Open URL in system browser (Windows/macOS/Linux)
+   */
+  protected async openInBrowser(url: string): Promise<boolean> {
+    try {
+      const platform = os.platform();
+      const cmd = platform === "win32" ? "start" : platform === "darwin" ? "open" : "xdg-open";
+      const { exec } = await import("child_process");
+      return new Promise((resolve) => {
+        exec(`${cmd} "${url}"`, (err) => {
+          if (err) {
+            console.log(chalk.gray(`Failed to open browser: ${err.message}`));
+            resolve(false);
+          } else {
+            resolve(true);
+          }
+        });
+      });
+    } catch {
+      return false;
+    }
+  }
 
   getSessionFilePath(): string {
     return path.join(process.cwd(), this.info.sessionFile);

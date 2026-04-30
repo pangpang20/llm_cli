@@ -52,9 +52,11 @@ class QwenProvider extends BaseProvider {
     console.log(chalk.cyan(`\n[${this.info.name}] Logging in...`));
 
     const hasDisplay = process.env.DISPLAY !== undefined;
-    if (!hasDisplay) {
-      console.log(chalk.yellow("No display detected. Using headless mode."));
-      return this.loginWithHeadless();
+    const isWindows = process.platform === "win32";
+
+    if (!hasDisplay || isWindows) {
+      console.log(chalk.yellow(isWindows ? "Windows detected. Opening system browser." : "No display detected. Using headless mode."));
+      return this.loginWithBrowser();
     }
 
     console.log("Opening browser for login...");
@@ -62,12 +64,20 @@ class QwenProvider extends BaseProvider {
   }
 
   /**
-   * Headless login: show URL and QR code, wait for user to complete login
+   * Login by opening system browser and waiting for user to complete login
    */
-  async loginWithHeadless(): Promise<Cookie[]> {
+  async loginWithBrowser(): Promise<Cookie[]> {
     const puppeteer = await import("puppeteer");
     const { renderBase64Image } = await import("../utils/renderImage");
 
+    // Try to open system browser first
+    const browserOpened = await this.openInBrowser(this.info.loginUrl);
+    if (browserOpened) {
+      console.log(chalk.green(`Opened ${this.info.loginUrl} in your browser.`));
+      console.log(chalk.gray("Please complete login in the browser window.\n"));
+    }
+
+    // Also launch headless browser to capture cookies
     const browser = await puppeteer.launch({
       headless: true,
       args: ["--no-sandbox", "--disable-setuid-sandbox"],
@@ -81,18 +91,18 @@ class QwenProvider extends BaseProvider {
       // Wait a bit for page to load
       await new Promise(r => setTimeout(r, 2000));
 
-      // Take screenshot
+      // Take screenshot for fallback
       const screenshot = await page.screenshot({ encoding: "base64" });
-      console.log(chalk.yellow("\nLogin page loaded.\n"));
-      console.log(chalk.cyan(`Open this URL in your browser to log in:`));
-      console.log(chalk.white(`  ${this.info.loginUrl}\n`));
-      console.log(chalk.yellow("Or scan the QR code below:\n"));
-      await renderBase64Image(screenshot);
 
-      // Wait for user to complete login using a simple sync read
-      console.log(chalk.gray("Waiting for you to complete login..."));
+      if (!browserOpened) {
+        console.log(chalk.yellow("\nFailed to open system browser. Showing QR code instead:\n"));
+        await renderBase64Image(screenshot);
+      } else {
+        console.log(chalk.cyan(`Or scan the QR code below if needed:\n`));
+        await renderBase64Image(screenshot);
+      }
 
-      // Use a simple sync approach for Windows compatibility
+      // Wait for user to complete login
       const answer = await new Promise<string>((resolve) => {
         const rl = readline.createInterface({ input: process.stdin });
         rl.question("Press Enter after logging in: ", (ans) => {

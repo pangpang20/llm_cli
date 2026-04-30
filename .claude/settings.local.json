@@ -19,7 +19,12 @@
       "Bash(timeout 5 node /opt/llm_cli/build/index.js)",
       "Bash(npm run *)",
       "Bash(cat)",
-      "Bash(node /tmp/test_toolparse.mjs)"
+      "Bash(node /tmp/test_toolparse.mjs)",
+      "Bash(curl -sI \"https://chat.qwen.ai/\")",
+      "Bash(curl -sL \"https://tongyi.aliyun.com/\")",
+      "Bash(node -e ' *)",
+      "Bash(node *)",
+      "Bash(git commit *)"
     ]
   }
 }
