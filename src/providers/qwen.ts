@@ -8,45 +8,28 @@ import { debug, info, error } from "../utils/logger";
 const QWEN_API = "https://chat.qwen.ai/api/v2/chat/completions";
 const QWEN_NEW_CHAT = "https://chat.qwen.ai/api/v2/chats/new";
 
-const QWEN_TOOL_INSTRUCTION = `CRITICAL: You have access to the following LOCAL TOOLS. You MUST use them for file operations, shell commands, and browser actions. NEVER say you cannot access the local filesystem.
+const QWEN_TOOL_INSTRUCTION = `You MUST use tools for file/shell/browser tasks.
 
-To call a tool, output a single line in this format:
+Tool call format: [TOOL_CALL:<tool_name>(param1="value1", param2="value2")]
 
-  [TOOL_CALL:actual_tool_name(arg1="value1", arg2="value2")]
+Available tools:
+- bash(command="...", timeout=30000)
+- read_file(file_path="...")
+- write_file(file_path="...", content="...")
+- edit_file(file_path="...", old_string="...", new_string="...")
+- browser_navigate(url="...")
+- browser_screenshot(path="...")
+- browser_text(selector="...")
+- browser_click(selector="...")
+- browser_type(selector="...", text="...")
 
-The "actual_tool_name" MUST be one of these exact names:
-- bash
-- read_file
-- write_file
-- edit_file
-- browser_navigate
-- browser_screenshot
-- browser_text
-- browser_click
-- browser_type
+RULE: Always use a REAL tool name (bash, read_file, write_file, edit_file, etc.). NEVER use "tool_name", "TOOLNAME", or any placeholder.
 
-Corresponding parameters:
-- bash: command (string), timeout (int)
-- read_file: file_path (string)
-- write_file: file_path (string), content (string)
-- edit_file: file_path (string), old_string (string), new_string (string)
-- browser_navigate: url (string)
-- browser_screenshot: path (string)
-- browser_text: selector (string)
-- browser_click: selector (string)
-- browser_type: selector (string), text (string)
+Examples:
+  [TOOL_CALL:bash(command="ls", timeout=30000)]
+  [TOOL_CALL:read_file(file_path="/etc/hosts")]
 
-DO NOT use placeholder names like "toolname" or "TOOLNAME". ALWAYS use one of the real tool names above.
-
-EXAMPLES (note: each example uses a REAL tool name, not a placeholder):
-  [TOOL_CALL:bash(command="ls -la", timeout=30000)]
-  [TOOL_CALL:read_file(file_path="README.md")]
-  [TOOL_CALL:write_file(file_path="test.txt", content="hello world")]
-  [TOOL_CALL:edit_file(file_path="src/main.py", old_string="def old():", new_string="def new():")]
-
-IMPORTANT: When you need to use a tool, respond with ONLY the tool call line. No other text.
-
----
+When using a tool, output ONLY the [TOOL_CALL:...] line, nothing else.
 
 `;
 
@@ -310,6 +293,7 @@ class QwenProvider extends BaseProvider {
     parentId: string,
     messages: ChatMessage[],
     model: string,
+    systemPrompt?: string,
   ): Record<string, unknown> {
     const timestamp = Math.floor(Date.now() / 1000);
 
@@ -318,10 +302,20 @@ class QwenProvider extends BaseProvider {
     const messageId = crypto.randomUUID();
     this.lastMessageId = messageId;
 
+    const apiMessages: Record<string, unknown>[] = [];
+
+    // Include system prompt as first message if provided
+    if (systemPrompt) {
+      apiMessages.push({
+        role: "system",
+        content: systemPrompt,
+      });
+    }
+
     // Prepend tool instruction so Qwen knows how to call tools
     const messageContent = QWEN_TOOL_INSTRUCTION + lastUserMessage;
 
-    const apiMessages: Record<string, unknown>[] = [{
+    apiMessages.push({
       fid: messageId,
       parentId: parentId || null,
       childrenIds: [],
@@ -343,7 +337,7 @@ class QwenProvider extends BaseProvider {
       },
       extra: { meta: { subChatType: "t2t" } },
       sub_chat_type: "t2t",
-    }];
+    });
 
     // Only include parent_id if it's not empty
     if (parentId) {
@@ -369,6 +363,9 @@ class QwenProvider extends BaseProvider {
   async chat(messages: ChatMessage[]): Promise<ChatResponse> {
     const model = process.env.QWEN_MODEL || "qwen3.6-plus";
 
+    // Extract system prompt from messages (first system message)
+    const systemPrompt = messages.find((m) => m.role === "system")?.content;
+
     // Create a new chat session on the server to get a valid chat_id
     if (!this.chatId) {
       info("[Qwen] No chat_id, creating new chat session...");
@@ -385,7 +382,7 @@ class QwenProvider extends BaseProvider {
     const parentId = this.lastResponseId || "";
 
     // Build request body matching the web frontend packet capture format
-    const requestBody = this.buildChatRequest(this.chatId, parentId, messages, model);
+    const requestBody = this.buildChatRequest(this.chatId, parentId, messages, model, systemPrompt);
     const bodyStr = JSON.stringify(requestBody);
 
     const url = `${QWEN_API}?chat_id=${encodeURIComponent(this.chatId)}`;
