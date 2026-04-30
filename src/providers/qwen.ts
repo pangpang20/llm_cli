@@ -6,6 +6,7 @@ import chalk from "chalk";
 import { debug, info, error } from "../utils/logger";
 
 const QWEN_API = "https://chat.qwen.ai/api/v2/chat/completions";
+const QWEN_NEW_CHAT = "https://chat.qwen.ai/api/v2/chats/new";
 
 class QwenProvider extends BaseProvider {
   readonly info: ProviderInfo = {
@@ -184,14 +185,81 @@ class QwenProvider extends BaseProvider {
     }
   }
 
-  private buildHeaders(): Record<string, string> {
+  private buildHeaders(extraHeaders?: Record<string, string>): Record<string, string> {
     return {
       "Content-Type": "application/json",
       Cookie: this.cookieString,
       Origin: "https://chat.qwen.ai",
       Referer: "https://chat.qwen.ai/",
       "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+      ...extraHeaders,
     };
+  }
+
+  /**
+   * Create a new chat session on the server and get the chat_id
+   */
+  private async fetchChatId(model: string): Promise<string> {
+    const timestamp = Date.now();
+    const body = JSON.stringify({
+      title: "新建对话",
+      models: [model],
+      chat_mode: "normal",
+      chat_type: "t2t",
+      timestamp,
+      project_id: "",
+    });
+
+    info(`[Qwen] Creating new chat via POST ${QWEN_NEW_CHAT}`);
+    info(`[Qwen] New chat request body: ${body}`);
+
+    return new Promise<string>((resolve, reject) => {
+      const parsed = new URL(QWEN_NEW_CHAT);
+      const req = https.request(parsed, {
+        method: "POST",
+        headers: this.buildHeaders(),
+        timeout: 30000,
+      }, (res) => {
+        let data = "";
+        res.on("data", (chunk: Buffer) => (data += chunk));
+        res.on("end", () => {
+          info(`[Qwen] New chat HTTP ${res.statusCode}`);
+          info(`[Qwen] New chat response headers: ${JSON.stringify(res.headers, null, 2)}`);
+          info(`[Qwen] New chat response body: ${data}`);
+
+          if (res.statusCode !== 200) {
+            reject(new Error(`New chat HTTP ${res.statusCode}: ${data.slice(0, 500)}`));
+            return;
+          }
+
+          try {
+            const json = JSON.parse(data);
+            info(`[Qwen] New chat parsed response keys: ${Object.keys(json).join(", ")}`);
+            if (json.data) {
+              info(`[Qwen] New chat data keys: ${Object.keys(json.data).join(", ")}`);
+            }
+            // Try common field names for chat_id
+            const chatId = json.data?.chat_id || json.chat_id || json.data?.id || json.id;
+            if (chatId) {
+              info(`[Qwen] Got chat_id from new chat response: ${chatId}`);
+              resolve(chatId);
+            } else {
+              info(`[Qwen] Full response: ${JSON.stringify(json)}`);
+              reject(new Error(`No chat_id found. Full response: ${data}`));
+            }
+          } catch (e) {
+            reject(new Error(`Failed to parse new chat response: ${data}`));
+          }
+        });
+      });
+
+      req.on("error", (err) => {
+        error(`[Qwen] New chat request error: ${err.message}`);
+        reject(err);
+      });
+      req.write(body);
+      req.end();
+    });
   }
 
   private buildChatRequest(
@@ -248,10 +316,21 @@ class QwenProvider extends BaseProvider {
   }
 
   async chat(messages: ChatMessage[]): Promise<ChatResponse> {
-    // Use consistent IDs for this conversation session
-    if (!this.chatId) this.chatId = crypto.randomUUID();
-    const parentId = this.lastMessageId || crypto.randomUUID();
     const model = process.env.QWEN_MODEL || "qwen3.6-plus";
+
+    // Create a new chat session on the server to get a valid chat_id
+    if (!this.chatId) {
+      info("[Qwen] No chat_id, creating new chat session...");
+      try {
+        this.chatId = await this.fetchChatId(model);
+        info(`[Qwen] Using new chat_id: ${this.chatId}`);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        error(`[Qwen] Failed to create chat: ${message}`);
+        throw new Error(`Failed to initialize chat: ${message}`);
+      }
+    }
+    const parentId = this.lastMessageId || crypto.randomUUID();
 
     // Build request body matching the web frontend packet capture format
     const requestBody = this.buildChatRequest(this.chatId, parentId, messages, model);
@@ -260,7 +339,8 @@ class QwenProvider extends BaseProvider {
     const url = `${QWEN_API}?chat_id=${encodeURIComponent(this.chatId)}`;
     info(`[Qwen] Chat request: model=${model}, messages=${messages.length}, chatId=${this.chatId}`);
     info(`[Qwen API] POST ${url}`);
-    info(`[Qwen API] Request body: ${bodyStr.slice(0, 1000)}`);
+    info(`[Qwen API] Request headers: ${JSON.stringify(this.buildHeaders())}`);
+    info(`[Qwen API] Request body: ${bodyStr}`);
 
     let content = "";
 
@@ -303,6 +383,7 @@ class QwenProvider extends BaseProvider {
         let accumulated = "";
         let buffer = "";
         let rawReceived = 0;
+        let errorDetail = "";
 
         res.on("data", (chunk: Buffer) => {
           rawReceived += chunk.length;
@@ -311,7 +392,7 @@ class QwenProvider extends BaseProvider {
 
           // Process complete SSE lines
           const lines = buffer.split("\n");
-          buffer = lines.pop() || ""; // keep incomplete line
+          buffer = lines.pop() || "";
 
           for (const line of lines) {
             const trimmed = line.trim();
@@ -326,6 +407,14 @@ class QwenProvider extends BaseProvider {
             try {
               const event = JSON.parse(jsonStr) as Record<string, unknown>;
               debug(`[Qwen SSE] Parsed event keys: ${Object.keys(event).join(", ")}`);
+
+              // Handle {success: false} error in SSE stream
+              if (event["success"] === false) {
+                const detail = (event["data"] || {}) as Record<string, unknown>;
+                errorDetail = `${event["request_id"] || ""} | ${detail["code"] || ""}: ${detail["details"] || ""}`;
+                error(`[Qwen SSE] Error in SSE stream: ${errorDetail}`);
+                continue;
+              }
 
               // Handle response.created event
               if (event["response.created"]) {
@@ -368,8 +457,12 @@ class QwenProvider extends BaseProvider {
         });
 
         res.on("end", () => {
-          info(`[Qwen SSE] Stream ended, raw=${rawReceived} bytes, content=${accumulated.length} chars`);
-          resolve(accumulated);
+          info(`[Qwen SSE] Stream ended: raw=${rawReceived} bytes, content=${accumulated.length} chars, errorDetail="${errorDetail}"`);
+          if (errorDetail && accumulated.length === 0) {
+            reject(new Error(`SSE stream error: ${errorDetail}`));
+          } else {
+            resolve(accumulated);
+          }
         });
 
         res.on("error", (err) => {
