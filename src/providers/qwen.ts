@@ -46,6 +46,7 @@ class QwenProvider extends BaseProvider {
     const existing = this.loadSession();
     if (existing && existing.length > 0) {
       info(`[Qwen] Using cached session, ${existing.length} cookies`);
+      this.cookieString = existing.map((c) => `${c.name}=${c.value}`).join("; ");
       console.log(chalk.gray(`Using cached session for ${this.info.name}...`));
       return existing;
     }
@@ -60,12 +61,16 @@ class QwenProvider extends BaseProvider {
     if (!hasDisplay || isWindows) {
       info(`[Qwen] Using visible browser login mode`);
       console.log(chalk.yellow(isWindows ? "Windows detected. Opening visible browser for login." : "No display detected. Opening visible browser for login."));
-      return this.loginWithBrowser();
+      const cookies = await this.loginWithBrowser();
+      this.cookieString = cookies.map((c) => `${c.name}=${c.value}`).join("; ");
+      return cookies;
     }
 
     info(`[Qwen] Using desktop mode with display`);
     console.log("Opening browser for login...");
-    return super.login();
+    const cookies = await super.login();
+    this.cookieString = cookies.map((c) => `${c.name}=${c.value}`).join("; ");
+    return cookies;
   }
 
   /**
@@ -203,34 +208,42 @@ class QwenProvider extends BaseProvider {
   }
 
   private async apiFetch(url: string, body: string): Promise<Record<string, unknown>> {
+    const headers = this.buildHeaders();
+    info(`[Qwen API] POST ${url}`);
+    info(`[Qwen API] Request body: ${body.slice(0, 500)}`);
+    info(`[Qwen API] Request headers Cookie: ${headers.Cookie ? headers.Cookie.slice(0, 100) : "(empty)"}`);
+
     return new Promise((resolve, reject) => {
       const parsed = new URL(url);
-      const req = https.request(parsed, { method: "POST", headers: this.buildHeaders() }, (res) => {
+      const req = https.request(parsed, { method: "POST", headers }, (res) => {
         let data = "";
         res.on("data", (chunk) => (data += chunk));
         res.on("end", () => {
           debug(`[Qwen API] Status: ${res.statusCode}`);
+          info(`[Qwen API] Response status: ${res.statusCode}, body length: ${data.length}`);
           if (res.statusCode !== 200) {
             error(`[Qwen API] HTTP ${res.statusCode}: ${data.slice(0, 500)}`);
+            info(`[Qwen API] Error response body: ${data}`);
             reject(new Error(`HTTP ${res.statusCode}: ${data}`));
             return;
           }
           try {
             const json = JSON.parse(data);
             debug(`[Qwen API] Response parsed OK`);
+            info(`[Qwen API] Success response: ${JSON.stringify(json).slice(0, 500)}`);
             resolve(json);
           } catch (e) {
             error(`[Qwen API] Failed to parse JSON: ${data.slice(0, 200)}`);
+            info(`[Qwen API] Raw response that failed to parse: ${data.slice(0, 500)}`);
             reject(new Error(`Failed to parse: ${data.slice(0, 500)}`));
           }
         });
       });
       req.on("error", (err) => {
         error(`[Qwen API] Request error: ${err.message}`);
+        info(`[Qwen API] Request error details: ${err}`);
         reject(err);
       });
-      debug(`[Qwen API] POST ${url}`);
-      debug(`[Qwen API] Body: ${body.slice(0, 200)}...`);
       req.write(body);
       req.end();
     });
@@ -243,16 +256,17 @@ class QwenProvider extends BaseProvider {
       .join("\n\n");
 
     const body = JSON.stringify({ prompt: conversationText, sessionId: this.sessionId });
+    info(`[Qwen] Chat request: message count=${messages.length}, cookieString length=${this.cookieString.length}, sessionId=${this.sessionId}`);
 
     let response: Record<string, unknown>;
     try {
       response = await this.apiFetch(QWEN_API, body);
-      console.log(chalk.gray(`  [Qwen API] Full response: ${JSON.stringify(response).slice(0, 500)}`));
+      info(`[Qwen] Chat response parsed successfully`);
     } catch (err) {
-      console.log(chalk.red(`  [Qwen API] Error details: ${err instanceof Error ? err.message : String(err)}`));
-      console.log(chalk.red(`  [Qwen API] Cookies: ${this.cookieString.slice(0, 100)}...`));
+      const message = err instanceof Error ? err.message : String(err);
+      error(`[Qwen] Chat error: ${message}`);
       throw new Error(
-        `Qwen API failed: ${err instanceof Error ? err.message : String(err)}. ` +
+        `Qwen API failed: ${message}. ` +
         "Try removing .qwen_session.json and logging in again."
       );
     }
