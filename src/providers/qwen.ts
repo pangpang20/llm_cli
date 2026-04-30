@@ -265,7 +265,7 @@ class QwenProvider extends BaseProvider {
 
   private buildChatRequest(
     chatId: string,
-    parentId: string | null,
+    parentId: string,
     messages: ChatMessage[],
     model: string,
   ): Record<string, unknown> {
@@ -273,7 +273,6 @@ class QwenProvider extends BaseProvider {
 
     // Extract system prompt if present
     const systemMessage = messages.find((m) => m.role === "system");
-    // Get last user message (or all user messages concatenated if no system prompt)
     const userMessages = messages.filter((m) => m.role === "user");
     const lastUserMessage = userMessages[userMessages.length - 1]?.content || "";
     const messageId = crypto.randomUUID();
@@ -285,9 +284,8 @@ class QwenProvider extends BaseProvider {
       messageContent = `${systemMessage.content}\n\n---\n\n${lastUserMessage}`;
     }
 
-    const apiMessages = [{
+    const apiMessages: Record<string, unknown>[] = [{
       fid: messageId,
-      parentId,
       childrenIds: [],
       role: "user",
       content: messageContent,
@@ -307,20 +305,31 @@ class QwenProvider extends BaseProvider {
       },
       extra: { meta: { subChatType: "agent" } },
       sub_chat_type: "agent",
-      parent_id: parentId,
     }];
 
-    return {
+    // Only include parent_id if it's not empty
+    if (parentId) {
+      (apiMessages[0] as Record<string, unknown>).parentId = parentId;
+      (apiMessages[0] as Record<string, unknown>).parent_id = parentId;
+    }
+
+    const body: Record<string, unknown> = {
       stream: true,
       version: "2.1",
       incremental_output: true,
       chat_id: chatId,
       chat_mode: "normal",
       model,
-      parent_id: parentId,
       messages: apiMessages,
       timestamp,
     };
+
+    // Only include parent_id at top level if it's not empty
+    if (parentId) {
+      body.parent_id = parentId;
+    }
+
+    return body as Record<string, unknown>;
   }
 
   async chat(messages: ChatMessage[]): Promise<ChatResponse> {
@@ -338,8 +347,8 @@ class QwenProvider extends BaseProvider {
         throw new Error(`Failed to initialize chat: ${message}`);
       }
     }
-    // For first message in chat, no parent. For subsequent messages, use server's response_id.
-    const parentId = this.lastResponseId || null;
+    // For first message in chat, use empty string. For subsequent messages, use server's response_id.
+    const parentId = this.lastResponseId || "";
 
     // Build request body matching the web frontend packet capture format
     const requestBody = this.buildChatRequest(this.chatId, parentId, messages, model);
