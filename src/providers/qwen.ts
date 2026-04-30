@@ -19,6 +19,7 @@ class QwenProvider extends BaseProvider {
 
   private chatId: string = "";
   private lastMessageId: string | null = null;
+  private lastResponseId: string | null = null;
 
   protected isLoginComplete(): string {
     return `() => {
@@ -330,7 +331,8 @@ class QwenProvider extends BaseProvider {
         throw new Error(`Failed to initialize chat: ${message}`);
       }
     }
-    const parentId = this.lastMessageId || null;
+    // For first message in chat, no parent. For subsequent messages, use server's response_id.
+    const parentId = this.lastResponseId || null;
 
     // Build request body matching the web frontend packet capture format
     const requestBody = this.buildChatRequest(this.chatId, parentId, messages, model);
@@ -384,6 +386,7 @@ class QwenProvider extends BaseProvider {
         let buffer = "";
         let rawReceived = 0;
         let errorDetail = "";
+        let currentResponseId: string | null = null;
 
         res.on("data", (chunk: Buffer) => {
           rawReceived += chunk.length;
@@ -421,8 +424,8 @@ class QwenProvider extends BaseProvider {
               // Handle response.created event
               if (event["response.created"]) {
                 const created = event["response.created"] as Record<string, unknown>;
-                const rid = (created.response_id as string) || "";
-                info(`[Qwen SSE] Response created: ${rid}`);
+                currentResponseId = (created.response_id as string) || null;
+                info(`[Qwen SSE] Response created: ${currentResponseId}`);
                 continue;
               }
 
@@ -451,6 +454,11 @@ class QwenProvider extends BaseProvider {
                     info(`[Qwen SSE] Phase "${phase}" finished, content length=${accumulated.length}`);
                   }
                 }
+
+                // Update lastResponseId from event-level response_id
+                if (event["response_id"]) {
+                  currentResponseId = (event["response_id"] as string) || currentResponseId;
+                }
               }
             } catch (e) {
               debug(`[Qwen SSE] Failed to parse SSE event: ${jsonStr.slice(0, 200)}`);
@@ -459,6 +467,11 @@ class QwenProvider extends BaseProvider {
         });
 
         res.on("end", () => {
+          // Save server's response_id for next message's parent
+          if (currentResponseId) {
+            this.lastResponseId = currentResponseId;
+            info(`[Qwen SSE] Saved lastResponseId: ${currentResponseId}`);
+          }
           info(`[Qwen SSE] Stream ended: raw=${rawReceived} bytes, content=${accumulated.length} chars, errorDetail="${errorDetail}"`);
           if (errorDetail && accumulated.length === 0) {
             reject(new Error(`SSE stream error: ${errorDetail}`));
