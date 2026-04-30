@@ -66,12 +66,14 @@ class QwenProvider extends BaseProvider {
   /**
    * Login by opening a visible browser and waiting for user to complete login
    * Uses a single browser instance so cookies are properly captured
+   * Does NOT auto-detect login completion — user presses Enter when ready
    */
   async loginWithBrowser(): Promise<Cookie[]> {
     const puppeteer = await import("puppeteer");
     const os = await import("os");
     const path = await import("path");
     const fs = await import("fs");
+    const readline = await import("readline");
 
     // Create a temporary user data directory so the browser behaves like a normal instance
     const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "qwen-login-"));
@@ -91,18 +93,14 @@ class QwenProvider extends BaseProvider {
       console.log(chalk.green(`Opened ${this.info.loginUrl} in your browser.`));
       console.log(chalk.gray("Please complete login in the browser window.\n"));
 
-      // Wait for login to complete with a 5-minute timeout
-      const loginComplete = await page.waitForFunction(
-        this.isLoginComplete(),
-        { timeout: 300000, polling: 1000 }
-      ).then(() => true).catch(() => false);
-
-      if (!loginComplete) {
-        throw new Error(
-          "Login timed out after 5 minutes. Please try again.\n" +
-          "Press Ctrl+C to cancel, then re-run and select your provider."
-        );
-      }
+      // Wait for user to press Enter after completing login
+      const rl = readline.createInterface({ input: process.stdin });
+      await new Promise<void>((resolve) => {
+        rl.question("Press Enter after you've logged in (Ctrl+C to cancel): ", () => {
+          rl.close();
+          resolve();
+        });
+      });
 
       // Give the page a moment to finish any post-login redirects
       await new Promise((r) => setTimeout(r, 3000));
@@ -120,8 +118,8 @@ class QwenProvider extends BaseProvider {
         return authCookies;
       } else {
         throw new Error(
-          "Login appeared to complete but no auth cookies were found.\n" +
-          "This may mean the login page changed. Please try again."
+          "Login completed but no auth cookies were found.\n" +
+          "Make sure you completed login in the browser window, then try again."
         );
       }
     } catch (err) {
