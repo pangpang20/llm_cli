@@ -4,6 +4,7 @@ import { getProvider, listProviders } from "./providers";
 import { BaseProvider, ChatMessage } from "./providers/base";
 import { cleanupBrowser } from "./tools";
 import { Harness } from "./harness";
+import { checkTrust } from "./harness/trust";
 import {
   readFileTool, writeFileTool, editFileTool, bashTool,
   browserNavigateTool, browserScreenshotTool, browserTextTool,
@@ -85,6 +86,9 @@ function createUI() {
 }
 
 async function main() {
+  // Trust check
+  await checkTrust();
+
   // Select provider
   const providerId = process.env.LLM_PROVIDER || "qwen";
   const provider: BaseProvider = getProvider(providerId);
