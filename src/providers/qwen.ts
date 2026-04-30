@@ -122,20 +122,15 @@ class QwenProvider extends BaseProvider {
       const pollInterval = setInterval(async () => {
         if (done) return;
 
-        // Check current page cookies
+        // Check current page cookies for auth tokens
         const cookies = await page.cookies();
         const hasAuthCookies = cookies.some((c) => authCookieNames.includes(c.name));
         info(`[Qwen] Polling: ${cookies.length} cookies, auth found=${hasAuthCookies}`);
 
-        // Check if page navigated away from login page
-        const currentUrl = page.url();
-        const isLoggedInUrl = !currentUrl.includes("login") && !currentUrl.includes("signin") && currentUrl.includes("chat");
-        info(`[Qwen] Current URL: ${currentUrl}, logged_in=${isLoggedInUrl}`);
-
-        if (hasAuthCookies || isLoggedInUrl) {
+        if (hasAuthCookies) {
           clearInterval(pollInterval);
           done = true;
-          info("[Qwen] Login detected! Refreshing page to capture final state");
+          info("[Qwen] Login detected via auth cookies! Refreshing page to capture final state");
           // Refresh to capture final login state
           await page.reload({ waitUntil: "domcontentloaded" }).catch(() => { /* ignore reload errors */ });
           await new Promise((r) => setTimeout(r, 2000));
