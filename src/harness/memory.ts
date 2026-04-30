@@ -101,6 +101,12 @@ export class Memory {
     return this.store.entries.filter((e) => e.type === "preference");
   }
 
+  getCounts(): Record<MemoryEntry["type"], number> {
+    const counts = { success: 0, failure: 0, preference: 0, fact: 0 };
+    for (const e of this.store.entries) counts[e.type]++;
+    return counts;
+  }
+
   clear(): void {
     this.store = { entries: [] };
     this.save();

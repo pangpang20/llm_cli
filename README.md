@@ -69,7 +69,8 @@ git clone git@github.com:pangpang20/llm_cli.git
 cd llm_cli
 
 # 安装依赖（会自动下载 Chromium）
-npm install
+# 中国大陆用户推荐使用 npmmirror 镜像加速：
+npm install --registry=https://registry.npmmirror.com
 
 # 编译 TypeScript
 npm run build

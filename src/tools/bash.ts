@@ -6,7 +6,6 @@ import { Tool } from "./types";
 // The tool runs in the user's trusted environment; the LLM acts on their behalf.
 const DESTRUCTIVE_PATTERNS: RegExp[] = [
   /\brm\s+(-[a-zA-Z]*[rRfF][a-zA-Z]*\s+)*(\/|\/\*|\.\.?\/)/,  // rm -rf /, rm -rf /*, rm -rf ./
-  /\brm\s+-[a-zA-Z]*[rRfF][a-zA-Z]*\s/,                         // rm -rf anything
   /\bmkfs\b/,                                                     // format filesystem
   /\bdd\s+(if=|of=)/,                                            // dd read/write
   /:\s*\{\s*:\s*\|/,                                             // fork bomb

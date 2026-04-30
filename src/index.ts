@@ -1,10 +1,11 @@
+import * as fs from "fs";
 import * as readline from "readline";
 import chalk from "chalk";
 import { getProvider, listProviders } from "./providers";
 import { BaseProvider, ChatMessage } from "./providers/base";
 import { cleanupBrowser } from "./tools";
 import { Harness } from "./harness";
-import { checkTrust } from "./harness/trust";
+import { checkTrust, isTrusted } from "./harness/trust";
 import {
   readFileTool, writeFileTool, editFileTool, bashTool,
   browserNavigateTool, browserScreenshotTool, browserTextTool,
@@ -85,7 +86,7 @@ function createUI() {
   };
 }
 
-async function selectProvider(): Promise<BaseProvider> {
+async function selectProvider(ui?: ReturnType<typeof createUI>): Promise<BaseProvider> {
   const providers = listProviders();
   const envId = process.env.LLM_PROVIDER;
 
@@ -103,20 +104,39 @@ async function selectProvider(): Promise<BaseProvider> {
   });
   console.log(chalk.gray("─".repeat(40)));
 
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-  return new Promise((resolve, reject) => {
-    rl.question(chalk.yellow("Provider (1-4) [1]: "), (answer) => {
-      rl.close();
-      const num = parseInt(answer.trim(), 10);
-      if (isNaN(num) || num < 1 || num > providers.length) {
-        console.log(chalk.gray(`Using default: ${providers[0].name}\n`));
-        return resolve(getProvider(providers[0].id));
-      }
-      console.log(chalk.gray(`Selected: ${providers[num - 1].name}\n`));
-      resolve(getProvider(providers[num - 1].id));
-    });
-    rl.once("close", () => reject(new Error("EOF")));
-  });
+  const answer = ui
+    ? await ui.prompt(chalk.yellow("Provider (1-4) [1]: "))
+    : await new Promise<string>((resolve, reject) => {
+        const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+        rl.question(chalk.yellow("Provider (1-4) [1]: "), (a) => { rl.close(); resolve(a); });
+        rl.once("close", () => reject(new Error("EOF")));
+      });
+
+  const num = parseInt(answer.trim(), 10);
+  if (isNaN(num) || num < 1 || num > providers.length) {
+    console.log(chalk.gray(`Using default: ${providers[0].name}\n`));
+    return getProvider(providers[0].id);
+  }
+  console.log(chalk.gray(`Selected: ${providers[num - 1].name}\n`));
+  return getProvider(providers[num - 1].id);
+}
+
+function formatSessionExpiry(provider: BaseProvider): string {
+  const filePath = provider.getSessionFilePath();
+  if (!fs.existsSync(filePath)) return "No session file";
+  try {
+    const data = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+    const savedAt = new Date(data.savedAt).getTime();
+    const elapsed = Date.now() - savedAt;
+    const maxAge = 12 * 60 * 60 * 1000;
+    const remaining = maxAge - elapsed;
+    if (remaining <= 0) return "Expired";
+    const hours = Math.floor(remaining / (60 * 60 * 1000));
+    const minutes = Math.floor((remaining % (60 * 60 * 1000)) / (60 * 1000));
+    return `Active (expires ${hours}h${minutes}m)`;
+  } catch {
+    return "Corrupted";
+  }
 }
 
 async function main() {
@@ -167,11 +187,9 @@ async function main() {
     }
     if (trimmed === "/provider") {
       console.log(chalk.gray("Switching provider...\n"));
-      const newProvider = await selectProvider();
+      const newProvider = await selectProvider(ui);
       await newProvider.login();
       console.log(chalk.green(`Switched to ${newProvider.info.name}.\n`));
-      // Can't easily reassign provider in the outer scope from here,
-      // so just inform the user to restart if they want to switch.
       console.log(chalk.gray("Note: Restart the session (/quit then llmcli) to use the new provider.\n"));
       continue;
     }
@@ -188,12 +206,135 @@ async function main() {
       console.log();
       continue;
     }
+    if (trimmed === "/status") {
+      const info = provider.info;
+      const sessionStatus = formatSessionExpiry(provider);
+      const dirTrusted = isTrusted(process.cwd());
+      const counts = harness.memory.getCounts();
+      const totalRules = harness.selfImprove.getConfig().rules.length;
+      const hooksConfig = harness.hooks.getConfig();
+      const totalHooks = hooksConfig.on_start.length + hooksConfig.on_error.length + hooksConfig.on_exit.length;
+      const totalMem = counts.success + counts.failure + counts.preference + counts.fact;
+
+      console.log(chalk.cyan("=== System Status ==="));
+      console.log(chalk.white(`Provider: ${chalk.bold(info.name)} (${info.id}) | ${info.loginUrl}`));
+      console.log(
+        sessionStatus.startsWith("Active")
+          ? chalk.green(`Session: ${sessionStatus} | saved at ${info.sessionFile}`)
+          : chalk.red(`Session: ${sessionStatus} | saved at ${info.sessionFile}`)
+      );
+      console.log(dirTrusted ? chalk.green("Directory: Trusted") : chalk.yellow("Directory: Not trusted"));
+      console.log(chalk.white(`Memory: ${totalMem} entries (${counts.success} success, ${counts.failure} failure, ${counts.preference} preference, ${counts.fact} fact)`));
+      console.log(chalk.white(`Rules: ${totalRules} learned`));
+      console.log(chalk.white(`Hooks: ${totalHooks} configured`));
+      console.log();
+      continue;
+    }
+    if (trimmed === "/config") {
+      while (true) {
+        console.log(chalk.cyan("=== Configuration ==="));
+        console.log(chalk.white("  1. View Hooks"));
+        console.log(chalk.white("  2. View Rules"));
+        console.log(chalk.white("  3. View Memory (recent)"));
+        console.log(chalk.white("  4. Clear Memory"));
+        console.log(chalk.white("  5. Clear Rules"));
+        console.log(chalk.white("  6. Toggle Auto-Learn"));
+        console.log(chalk.gray("  ─────────────────────"));
+        console.log(chalk.white("  Q. Back\n"));
+
+        const choice = (await ui.prompt("Choice: ")).trim().toLowerCase();
+
+        if (choice === "q" || choice === "quit" || choice === "back") {
+          console.log();
+          break;
+        }
+
+        switch (choice) {
+          case "1": {
+            const hooks = harness.hooks.getConfig();
+            console.log(chalk.cyan("Hooks:"));
+            for (const event of (["on_start", "on_error", "on_exit"] as const)) {
+              const items = hooks[event];
+              if (items.length === 0) {
+                console.log(chalk.gray(`  ${event}: (none)`));
+              } else {
+                console.log(chalk.yellow(`  ${event}:`));
+                for (const h of items) {
+                  console.log(`    ${chalk.white(h.name)}: ${chalk.gray(h.command)}`);
+                }
+              }
+            }
+            console.log();
+            break;
+          }
+          case "2": {
+            const rules = harness.selfImprove.getConfig().rules;
+            if (rules.length === 0) {
+              console.log(chalk.gray("No learned rules.\n"));
+            } else {
+              console.log(chalk.cyan(`Learned Rules (${rules.length}):`));
+              for (const r of rules) {
+                console.log(chalk.white(`  ${r.description}`) + chalk.gray(` [by: ${r.triggeredBy}, hits: ${r.hits}]`));
+              }
+              console.log();
+            }
+            break;
+          }
+          case "3": {
+            const recent = harness.memory.getRecent("fact", 10);
+            if (recent.length === 0) {
+              console.log(chalk.gray("No recent memory entries.\n"));
+            } else {
+              console.log(chalk.cyan("Recent Entries:"));
+              for (const e of recent) {
+                const icon = e.type === "success" ? chalk.green("✓") : e.type === "failure" ? chalk.red("✗") : chalk.blue("•");
+                console.log(`${icon} ${chalk.white(e.content.slice(0, 100))}`);
+              }
+              console.log();
+            }
+            break;
+          }
+          case "4": {
+            const confirm = await ui.prompt(chalk.yellow("Clear all memory? (y/N) "));
+            if (confirm.trim().toLowerCase() === "y") {
+              harness.memory.clear();
+              console.log(chalk.green("Memory cleared.\n"));
+            } else {
+              console.log(chalk.gray("Cancelled.\n"));
+            }
+            break;
+          }
+          case "5": {
+            const confirm = await ui.prompt(chalk.yellow("Clear all rules? (y/N) "));
+            if (confirm.trim().toLowerCase() === "y") {
+              harness.selfImprove.clearRules();
+              console.log(chalk.green("Rules cleared.\n"));
+            } else {
+              console.log(chalk.gray("Cancelled.\n"));
+            }
+            break;
+          }
+          case "6": {
+            const config = harness.selfImprove.getConfig();
+            config.autoLearn = !config.autoLearn;
+            harness.selfImprove.save();
+            console.log(chalk.green(`Auto-Learn ${config.autoLearn ? "enabled" : "disabled"}.\n`));
+            break;
+          }
+          default:
+            console.log(chalk.yellow("Invalid choice. Try again.\n"));
+        }
+      }
+      continue;
+    }
     if (trimmed === "/help") {
       console.log(chalk.cyan("Commands:"));
       console.log("  /clear      - Clear conversation history");
+      console.log("  /config     - View and manage configuration");
       console.log("  /login      - Re-authenticate with browser");
-      console.log("  /provider   - List available AI providers");
       console.log("  /memory     - Show learned memories");
+      console.log("  /provider   - Switch AI provider");
+      console.log("  /status     - Show system status");
       console.log("  /quit       - Exit");
       console.log("  /help       - Show this help");
       console.log("\nJust type your message to start chatting.\n");

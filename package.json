@@ -11,7 +11,7 @@
     "start": "node dist/index.js",
     "dev": "tsc --watch",
     "lint": "tsc --noEmit",
-    "postinstall": "chmod +x bin/llmcli && npm link 2>/dev/null || true"
+    "postinstall": "chmod +x bin/llmcli"
   },
   "files": [
     "dist/**/*",

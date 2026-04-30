@@ -24,10 +24,12 @@ function saveStore(store: TrustStore): void {
   fs.writeFileSync(TRUST_FILE, JSON.stringify(store, null, 2));
 }
 
-function isTrusted(dir: string): boolean {
+export function isTrusted(dir: string): boolean {
   const store = loadStore();
   const resolved = path.resolve(dir);
-  return store.dirs.includes(resolved);
+  // Exact match or subdirectory of a trusted dir
+  if (store.dirs.includes(resolved)) return true;
+  return store.dirs.some((d) => resolved.startsWith(d + path.sep));
 }
 
 function addTrusted(dir: string): void {

@@ -77,9 +77,8 @@ export class Hooks {
     for (const hook of hooks) {
       try {
         const { execFile } = require("child_process");
-        const parts = hook.command.split(/\s+/);
         await new Promise<void>((resolve, reject) => {
-          execFile(parts[0], parts.slice(1), { timeout: 10000 }, (err: Error | null) => {
+          execFile("/bin/sh", ["-c", hook.command], { timeout: 10000 }, (err: Error | null) => {
             if (err) reject(err);
             else resolve();
           });
