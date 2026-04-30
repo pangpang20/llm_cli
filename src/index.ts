@@ -1,4 +1,5 @@
 import * as fs from "fs";
+import * as path from "path";
 import * as readline from "readline";
 import chalk from "chalk";
 import { getProvider, listProviders } from "./providers";
@@ -82,6 +83,42 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
   } catch (err: unknown) {
     return `Error: ${err instanceof Error ? err.message : String(err)}`;
   }
+}
+
+/**
+ * Parse @file references in user input and replace them with file content.
+ * Supports: @path/to/file (relative or absolute)
+ * Returns processed message with file contents embedded.
+ */
+async function expandFileAttachments(input: string): Promise<string> {
+  const fileRegex = /@(\S+)/g;
+  const matches = [...input.matchAll(fileRegex)];
+  if (matches.length === 0) return input;
+
+  let result = input;
+  const fileContents: string[] = [];
+
+  for (const match of matches) {
+    const filePath = match[1];
+    const fullPath = path.isAbsolute(filePath) ? filePath : path.join(process.cwd(), filePath);
+
+    try {
+      const content = fs.readFileSync(fullPath, "utf-8");
+      const ext = path.extname(filePath).slice(1).toLowerCase();
+      const langHint = ext || "text";
+      fileContents.push(`--- File: ${filePath} ---\n\`\`\`${langHint}\n${content}\n\`\`\`\n--- End of ${filePath} ---`);
+      result = result.replace(match[0], `[File: ${filePath}]`);
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      fileContents.push(`--- File: ${filePath} (ERROR: ${errMsg}) ---`);
+      result = result.replace(match[0], `[File: ${filePath} - NOT FOUND]`);
+    }
+  }
+
+  if (fileContents.length > 0) {
+    return `${result}\n\n--- Attached File Content ---\n${fileContents.join("\n")}\n--- End of Attachments ---`;
+  }
+  return result;
 }
 
 function createUI() {
@@ -394,11 +431,14 @@ async function main() {
       console.log("  /status     - Show system status");
       console.log("  /quit       - Exit");
       console.log("  /help       - Show this help");
-      console.log("\nJust type your message to start chatting.\n");
+      console.log("\nJust type your message to start chatting.");
+      console.log("Use @path/to/file to attach file content to your message.\n");
       continue;
     }
 
-    chatHistory.push({ role: "user", content: trimmed });
+    // Expand @file references with actual file content
+    const expandedInput = await expandFileAttachments(trimmed);
+    chatHistory.push({ role: "user", content: expandedInput });
 
     let maxToolRounds = 10;
     while (maxToolRounds > 0) {
