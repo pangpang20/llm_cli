@@ -29,9 +29,7 @@ Examples:
   [TOOL_CALL:bash(command="ls", timeout=30000)]
   [TOOL_CALL:read_file(file_path="/etc/hosts")]
 
-When using a tool, output ONLY the [TOOL_CALL:...] line, nothing else.
-
-`;
+When using a tool, output ONLY the [TOOL_CALL:...] line, nothing else.`;
 
 class QwenProvider extends BaseProvider {
   readonly info: ProviderInfo = {
@@ -304,16 +302,13 @@ class QwenProvider extends BaseProvider {
 
     const apiMessages: Record<string, unknown>[] = [];
 
-    // Include system prompt as first message if provided
+    // Combine system prompt + tool instruction into user message
+    // (Qwen web API doesn't accept separate system role messages)
+    let messageContent = "";
     if (systemPrompt) {
-      apiMessages.push({
-        role: "system",
-        content: systemPrompt,
-      });
+      messageContent += "<system_prompt>\n" + systemPrompt + "\n</system_prompt>\n\n";
     }
-
-    // Prepend tool instruction so Qwen knows how to call tools
-    const messageContent = QWEN_TOOL_INSTRUCTION + lastUserMessage;
+    messageContent += QWEN_TOOL_INSTRUCTION + "\n\n---\n\n" + lastUserMessage;
 
     apiMessages.push({
       fid: messageId,
