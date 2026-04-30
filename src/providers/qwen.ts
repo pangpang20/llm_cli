@@ -264,7 +264,7 @@ class QwenProvider extends BaseProvider {
 
   private buildChatRequest(
     chatId: string,
-    parentId: string,
+    parentId: string | null,
     messages: ChatMessage[],
     model: string,
   ): Record<string, unknown> {
@@ -330,7 +330,7 @@ class QwenProvider extends BaseProvider {
         throw new Error(`Failed to initialize chat: ${message}`);
       }
     }
-    const parentId = this.lastMessageId || crypto.randomUUID();
+    const parentId = this.lastMessageId || null;
 
     // Build request body matching the web frontend packet capture format
     const requestBody = this.buildChatRequest(this.chatId, parentId, messages, model);
@@ -396,12 +396,14 @@ class QwenProvider extends BaseProvider {
 
           for (const line of lines) {
             const trimmed = line.trim();
-            if (!trimmed || !trimmed.startsWith("data:")) {
-              debug(`[Qwen SSE] Skipping non-data line: ${trimmed.slice(0, 100)}`);
-              continue;
-            }
+            if (!trimmed) continue;
 
-            const jsonStr = trimmed.slice(5).trim();
+            let jsonStr: string;
+            if (trimmed.startsWith("data:")) {
+              jsonStr = trimmed.slice(5).trim();
+            } else {
+              jsonStr = trimmed;
+            }
             if (!jsonStr) continue;
 
             try {
