@@ -8,6 +8,48 @@ import { debug, info, error } from "../utils/logger";
 const QWEN_API = "https://chat.qwen.ai/api/v2/chat/completions";
 const QWEN_NEW_CHAT = "https://chat.qwen.ai/api/v2/chats/new";
 
+const QWEN_TOOL_INSTRUCTION = `CRITICAL: You have access to the following LOCAL TOOLS. You MUST use them for file operations, shell commands, and browser actions. NEVER say you cannot access the local filesystem.
+
+To call a tool, output a single line in this format:
+
+  [TOOL_CALL:actual_tool_name(arg1="value1", arg2="value2")]
+
+The "actual_tool_name" MUST be one of these exact names:
+- bash
+- read_file
+- write_file
+- edit_file
+- browser_navigate
+- browser_screenshot
+- browser_text
+- browser_click
+- browser_type
+
+Corresponding parameters:
+- bash: command (string), timeout (int)
+- read_file: file_path (string)
+- write_file: file_path (string), content (string)
+- edit_file: file_path (string), old_string (string), new_string (string)
+- browser_navigate: url (string)
+- browser_screenshot: path (string)
+- browser_text: selector (string)
+- browser_click: selector (string)
+- browser_type: selector (string), text (string)
+
+DO NOT use placeholder names like "toolname" or "TOOLNAME". ALWAYS use one of the real tool names above.
+
+EXAMPLES (note: each example uses a REAL tool name, not a placeholder):
+  [TOOL_CALL:bash(command="ls -la", timeout=30000)]
+  [TOOL_CALL:read_file(file_path="README.md")]
+  [TOOL_CALL:write_file(file_path="test.txt", content="hello world")]
+  [TOOL_CALL:edit_file(file_path="src/main.py", old_string="def old():", new_string="def new():")]
+
+IMPORTANT: When you need to use a tool, respond with ONLY the tool call line. No other text.
+
+---
+
+`;
+
 class QwenProvider extends BaseProvider {
   readonly info: ProviderInfo = {
     id: "qwen",
@@ -276,12 +318,15 @@ class QwenProvider extends BaseProvider {
     const messageId = crypto.randomUUID();
     this.lastMessageId = messageId;
 
+    // Prepend tool instruction so Qwen knows how to call tools
+    const messageContent = QWEN_TOOL_INSTRUCTION + lastUserMessage;
+
     const apiMessages: Record<string, unknown>[] = [{
       fid: messageId,
       parentId: parentId || null,
       childrenIds: [],
       role: "user",
-      content: lastUserMessage,
+      content: messageContent,
       user_action: "chat",
       files: [],
       timestamp,
