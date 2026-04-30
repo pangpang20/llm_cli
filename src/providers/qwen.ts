@@ -271,29 +271,22 @@ class QwenProvider extends BaseProvider {
   ): Record<string, unknown> {
     const timestamp = Math.floor(Date.now() / 1000);
 
-    // Extract system prompt if present
-    const systemMessage = messages.find((m) => m.role === "system");
     const userMessages = messages.filter((m) => m.role === "user");
     const lastUserMessage = userMessages[userMessages.length - 1]?.content || "";
     const messageId = crypto.randomUUID();
     this.lastMessageId = messageId;
 
-    // Prepend system prompt to user message if present
-    let messageContent = lastUserMessage;
-    if (systemMessage) {
-      messageContent = `${systemMessage.content}\n\n---\n\n${lastUserMessage}`;
-    }
-
     const apiMessages: Record<string, unknown>[] = [{
       fid: messageId,
+      parentId: parentId || null,
       childrenIds: [],
       role: "user",
-      content: messageContent,
+      content: lastUserMessage,
       user_action: "chat",
       files: [],
       timestamp,
       models: [model],
-      chat_type: "agent",
+      chat_type: "t2t",
       feature_config: {
         thinking_enabled: true,
         output_schema: "phase",
@@ -303,8 +296,8 @@ class QwenProvider extends BaseProvider {
         thinking_format: "summary",
         auto_search: true,
       },
-      extra: { meta: { subChatType: "agent" } },
-      sub_chat_type: "agent",
+      extra: { meta: { subChatType: "t2t" } },
+      sub_chat_type: "t2t",
     }];
 
     // Only include parent_id if it's not empty
@@ -320,14 +313,10 @@ class QwenProvider extends BaseProvider {
       chat_id: chatId,
       chat_mode: "normal",
       model,
+      parent_id: parentId || null,
       messages: apiMessages,
       timestamp,
     };
-
-    // Only include parent_id at top level if it's not empty
-    if (parentId) {
-      body.parent_id = parentId;
-    }
 
     return body as Record<string, unknown>;
   }
