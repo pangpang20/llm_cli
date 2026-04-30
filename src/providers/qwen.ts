@@ -1,10 +1,11 @@
 import * as https from "https";
 import { Cookie } from "puppeteer";
 import { BaseProvider, ChatMessage, ChatResponse, ProviderInfo } from "./base";
+import * as crypto from "crypto";
 import chalk from "chalk";
 import { debug, info, error } from "../utils/logger";
 
-const QWEN_API = "https://chat.qwen.ai/api/chat";
+const QWEN_API = "https://chat.qwen.ai/api/v2/chat/completions";
 
 class QwenProvider extends BaseProvider {
   readonly info: ProviderInfo = {
@@ -15,14 +16,14 @@ class QwenProvider extends BaseProvider {
     apiUrl: QWEN_API,
   };
 
+  private chatId: string = "";
+
   protected isLoginComplete(): string {
     return `() => {
       const url = window.location.href;
-      // Check if user is logged in (not on login page)
       if (url.includes("login") || url.includes("signin")) {
         return false;
       }
-      // Check for user avatar or profile element
       const avatar = document.querySelector('[class*="avatar"], [class*="user"], [class*="profile"]');
       return !!avatar;
     }`;
@@ -73,11 +74,6 @@ class QwenProvider extends BaseProvider {
     return cookies;
   }
 
-  /**
-   * Login by opening a visible browser and waiting for user to complete login
-   * Auto-detects login by monitoring cookies and navigation
-   * Falls back to manual Enter after 5 minute timeout
-   */
   async loginWithBrowser(): Promise<Cookie[]> {
     const puppeteer = await import("puppeteer");
     const os = await import("os");
@@ -85,10 +81,8 @@ class QwenProvider extends BaseProvider {
     const fs = await import("fs");
     const readline = await import("readline");
 
-    // Create a temporary user data directory so the browser behaves like a normal instance
     const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "qwen-login-"));
 
-    // Launch a visible browser (non-headless) so the user can interact with the login page
     const browser = await puppeteer.launch({
       headless: false,
       userDataDir,
@@ -103,7 +97,6 @@ class QwenProvider extends BaseProvider {
       const page = await browser.newPage();
       info("[Qwen] Browser launched, new page created");
 
-      // Hide webdriver fingerprint before any page loads
       await page.evaluateOnNewDocument(() => {
         Object.defineProperty(navigator, "webdriver", { get: () => false });
         // @ts-ignore
@@ -120,14 +113,12 @@ class QwenProvider extends BaseProvider {
       console.log(chalk.green(`Opened ${this.info.loginUrl} in your browser.`));
       console.log(chalk.gray("Please complete login in the browser window.\n"));
 
-      // Auto-detect login completion by polling for auth cookies and navigation
       const authCookieNames = ["token", "session_id", "sid", "refresh_token", "ctoken", "csrf"];
       let done = false;
 
       const pollInterval = setInterval(async () => {
         if (done) return;
 
-        // Check current page cookies for auth tokens
         const cookies = await page.cookies();
         const hasAuthCookies = cookies.some((c) => authCookieNames.includes(c.name));
         info(`[Qwen] Polling: ${cookies.length} cookies, auth found=${hasAuthCookies}`);
@@ -136,13 +127,11 @@ class QwenProvider extends BaseProvider {
           clearInterval(pollInterval);
           done = true;
           info("[Qwen] Login detected via auth cookies! Refreshing page to capture final state");
-          // Refresh to capture final login state
-          await page.reload({ waitUntil: "domcontentloaded" }).catch(() => { /* ignore reload errors */ });
+          await page.reload({ waitUntil: "domcontentloaded" }).catch(() => { /* ignore */ });
           await new Promise((r) => setTimeout(r, 2000));
         }
       }, 2000);
 
-      // Timeout fallback after 5 minutes
       const timeoutPromise = new Promise<void>((resolve) => {
         setTimeout(() => {
           if (done) { resolve(); return; }
@@ -157,7 +146,6 @@ class QwenProvider extends BaseProvider {
         }, 300000);
       });
 
-      // Poll completion checker: resolve immediately when done becomes true
       const doneCheck = new Promise<void>((resolve) => {
         const check = setInterval(() => {
           if (done) { clearInterval(check); resolve(); }
@@ -166,14 +154,12 @@ class QwenProvider extends BaseProvider {
 
       await Promise.race([doneCheck, timeoutPromise]);
 
-      // Extract cookies from all relevant domains
       const allCookies = await page.cookies();
       info(`[Qwen] Total cookies found: ${allCookies.length}`);
       const authCookies = this.extractAuthCookies(allCookies);
       info(`[Qwen] Auth cookies found: ${authCookies.length}, names: ${authCookies.map(c => c.name).join(", ")}`);
 
       await browser.close();
-      // Clean up temp directory
       try { fs.rmSync(userDataDir, { recursive: true, force: true }); } catch { /* ignore */ }
       info("[Qwen] Browser closed, temp directory cleaned");
 
@@ -203,65 +189,84 @@ class QwenProvider extends BaseProvider {
       Cookie: this.cookieString,
       Origin: "https://chat.qwen.ai",
       Referer: "https://chat.qwen.ai/",
-      "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
     };
   }
 
-  private async apiFetch(url: string, body: string): Promise<Record<string, unknown>> {
-    const headers = this.buildHeaders();
-    info(`[Qwen API] POST ${url}`);
-    info(`[Qwen API] Request body: ${body.slice(0, 500)}`);
-    info(`[Qwen API] Request headers Cookie: ${headers.Cookie ? headers.Cookie.slice(0, 100) : "(empty)"}`);
+  private buildChatRequest(
+    chatId: string,
+    parentId: string,
+    messages: ChatMessage[],
+    model: string,
+  ): Record<string, unknown> {
+    const timestamp = Math.floor(Date.now() / 1000);
 
-    return new Promise((resolve, reject) => {
-      const parsed = new URL(url);
-      const req = https.request(parsed, { method: "POST", headers }, (res) => {
-        let data = "";
-        res.on("data", (chunk) => (data += chunk));
-        res.on("end", () => {
-          debug(`[Qwen API] Status: ${res.statusCode}`);
-          info(`[Qwen API] Response status: ${res.statusCode}, body length: ${data.length}`);
-          if (res.statusCode !== 200) {
-            error(`[Qwen API] HTTP ${res.statusCode}: ${data.slice(0, 500)}`);
-            info(`[Qwen API] Error response body: ${data}`);
-            reject(new Error(`HTTP ${res.statusCode}: ${data}`));
-            return;
-          }
-          try {
-            const json = JSON.parse(data);
-            debug(`[Qwen API] Response parsed OK`);
-            info(`[Qwen API] Success response: ${JSON.stringify(json).slice(0, 500)}`);
-            resolve(json);
-          } catch (e) {
-            error(`[Qwen API] Failed to parse JSON: ${data.slice(0, 200)}`);
-            info(`[Qwen API] Raw response that failed to parse: ${data.slice(0, 500)}`);
-            reject(new Error(`Failed to parse: ${data.slice(0, 500)}`));
-          }
-        });
-      });
-      req.on("error", (err) => {
-        error(`[Qwen API] Request error: ${err.message}`);
-        info(`[Qwen API] Request error details: ${err}`);
-        reject(err);
-      });
-      req.write(body);
-      req.end();
+    // Build message list matching the web API format
+    const apiMessages = messages.map((m, idx) => {
+      const isLast = idx === messages.length - 1;
+      const msg: Record<string, unknown> = {
+        fid: crypto.randomUUID(),
+        parentId: parentId,
+        childrenIds: [],
+        role: m.role,
+        content: m.content,
+        user_action: "chat",
+        files: [],
+        timestamp,
+        models: [model],
+        chat_type: "t2t",
+        feature_config: {
+          thinking_enabled: true,
+          output_schema: "phase",
+          research_mode: "normal",
+          auto_thinking: true,
+          thinking_mode: "Auto",
+          thinking_format: "summary",
+          auto_search: true,
+        },
+        extra: { meta: { subChatType: "t2t" } },
+        sub_chat_type: "t2t",
+        parent_id: parentId,
+      };
+      // Only add childrenIds to the last message (will get a response)
+      if (isLast) {
+        msg.childrenIds = [];
+      }
+      return msg;
     });
+
+    return {
+      stream: true,
+      version: "2.1",
+      incremental_output: true,
+      chat_id: chatId,
+      chat_mode: "normal",
+      model,
+      parent_id: parentId,
+      messages: apiMessages,
+      timestamp,
+    };
   }
 
   async chat(messages: ChatMessage[]): Promise<ChatResponse> {
-    const conversationText = messages
-      .filter((m) => m.role !== "system")
-      .map((m) => `${m.role}: ${m.content}`)
-      .join("\n\n");
+    // Use consistent IDs for this conversation session
+    if (!this.chatId) this.chatId = crypto.randomUUID();
+    const parentId = crypto.randomUUID();
+    const model = process.env.QWEN_MODEL || "qwen3.6-plus";
 
-    const body = JSON.stringify({ prompt: conversationText, sessionId: this.sessionId });
-    info(`[Qwen] Chat request: message count=${messages.length}, cookieString length=${this.cookieString.length}, sessionId=${this.sessionId}`);
+    const requestBody = this.buildChatRequest(this.chatId, parentId, messages, model);
+    const bodyStr = JSON.stringify(requestBody);
 
-    let response: Record<string, unknown>;
+    const url = `${QWEN_API}?chat_id=${encodeURIComponent(this.chatId)}`;
+    info(`[Qwen] Chat request: model=${model}, messages=${messages.length}, chatId=${this.chatId}`);
+    info(`[Qwen API] POST ${url}`);
+    info(`[Qwen API] Request body: ${bodyStr.slice(0, 500)}`);
+
+    let content = "";
+
     try {
-      response = await this.apiFetch(QWEN_API, body);
-      info(`[Qwen] Chat response parsed successfully`);
+      content = await this.sseFetch(url, bodyStr);
+      info(`[Qwen] Chat response: ${content.length} chars`);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       error(`[Qwen] Chat error: ${message}`);
@@ -271,14 +276,109 @@ class QwenProvider extends BaseProvider {
       );
     }
 
-    if (typeof response.sessionId === "string") this.sessionId = response.sessionId;
-
-    const content = typeof response.content === "string" ? response.content
-      : typeof response.message === "string" ? response.message
-      : typeof response.text === "string" ? response.text
-      : JSON.stringify(response);
-
     return { content };
+  }
+
+  /**
+   * Fetch SSE streaming response and accumulate assistant content
+   */
+  private sseFetch(url: string, body: string): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const parsed = new URL(url);
+      const req = https.request(parsed, {
+        method: "POST",
+        headers: this.buildHeaders(),
+        timeout: 120000,
+      }, (res) => {
+        if (res.statusCode !== 200) {
+          let errData = "";
+          res.on("data", (chunk) => (errData += chunk));
+          res.on("end", () => {
+            error(`[Qwen API] HTTP ${res.statusCode}: ${errData}`);
+            reject(new Error(`HTTP ${res.statusCode}: ${errData}`));
+          });
+          return;
+        }
+
+        let accumulated = "";
+        let buffer = "";
+
+        res.on("data", (chunk: Buffer) => {
+          buffer += chunk.toString();
+
+          // Process complete SSE lines
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || ""; // keep incomplete line
+
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed || !trimmed.startsWith("data:")) continue;
+
+            const jsonStr = trimmed.slice(5).trim();
+            if (!jsonStr) continue;
+
+            try {
+              const event = JSON.parse(jsonStr) as Record<string, unknown>;
+
+              // Handle response.created event
+              if (event["response.created"]) {
+                const created = event["response.created"] as Record<string, unknown>;
+                const rid = (created.response_id as string) || "";
+                info(`[Qwen SSE] Response created: ${rid}`);
+                continue;
+              }
+
+              // Handle response.completed event
+              if (event["response.completed"]) {
+                info(`[Qwen SSE] Response completed`);
+                continue;
+              }
+
+              // Handle choices array with delta content
+              if (event.choices && Array.isArray(event.choices)) {
+                for (const choice of event.choices) {
+                  const c = choice as Record<string, unknown>;
+                  const delta = (c.delta || {}) as Record<string, unknown>;
+                  const phase = (delta.phase as string) || "";
+                  const status = (delta.status as string) || "";
+                  const deltaContent = (delta.content as string) || "";
+
+                  // Accumulate content from "answer" phase
+                  if (phase === "answer") {
+                    accumulated += deltaContent;
+                  }
+
+                  // Log phase transitions
+                  if (status === "finished") {
+                    info(`[Qwen SSE] Phase "${phase}" finished, content length=${accumulated.length}`);
+                  }
+                }
+              }
+            } catch (e) {
+              debug(`[Qwen SSE] Failed to parse SSE event: ${jsonStr.slice(0, 200)}`);
+            }
+          }
+        });
+
+        res.on("end", () => {
+          info(`[Qwen SSE] Stream ended, total content: ${accumulated.length} chars`);
+          resolve(accumulated);
+        });
+
+        res.on("error", (err) => {
+          error(`[Qwen SSE] Stream error: ${err.message}`);
+          reject(err);
+        });
+      });
+
+      req.on("error", (err) => {
+        error(`[Qwen API] Request error: ${err.message}`);
+        reject(err);
+      });
+
+      req.write(body);
+      req.end();
+    });
   }
 }
 
