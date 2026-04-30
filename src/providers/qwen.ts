@@ -17,6 +17,7 @@ class QwenProvider extends BaseProvider {
   };
 
   private chatId: string = "";
+  private lastMessageId: string | null = null;
 
   protected isLoginComplete(): string {
     return `() => {
@@ -201,39 +202,37 @@ class QwenProvider extends BaseProvider {
   ): Record<string, unknown> {
     const timestamp = Math.floor(Date.now() / 1000);
 
-    // Build message list matching the web API format
-    const apiMessages = messages.map((m, idx) => {
-      const isLast = idx === messages.length - 1;
-      const msg: Record<string, unknown> = {
-        fid: crypto.randomUUID(),
-        parentId: parentId,
-        childrenIds: [],
-        role: m.role,
-        content: m.content,
-        user_action: "chat",
-        files: [],
-        timestamp,
-        models: [model],
-        chat_type: "t2t",
-        feature_config: {
-          thinking_enabled: true,
-          output_schema: "phase",
-          research_mode: "normal",
-          auto_thinking: true,
-          thinking_mode: "Auto",
-          thinking_format: "summary",
-          auto_search: true,
-        },
-        extra: { meta: { subChatType: "t2t" } },
-        sub_chat_type: "t2t",
-        parent_id: parentId,
-      };
-      // Only add childrenIds to the last message (will get a response)
-      if (isLast) {
-        msg.childrenIds = [];
-      }
-      return msg;
-    });
+    // Build only the current user message (no system/history in array)
+    // Server tracks conversation context via chat_id + parent_id
+    const userMessages = messages.filter((m) => m.role === "user");
+    const lastUserMessage = userMessages[userMessages.length - 1]?.content || "";
+    const messageId = crypto.randomUUID();
+    this.lastMessageId = messageId;
+
+    const apiMessages = [{
+      fid: messageId,
+      parentId,
+      childrenIds: [],
+      role: "user",
+      content: lastUserMessage,
+      user_action: "chat",
+      files: [],
+      timestamp,
+      models: [model],
+      chat_type: "t2t",
+      feature_config: {
+        thinking_enabled: true,
+        output_schema: "phase",
+        research_mode: "normal",
+        auto_thinking: true,
+        thinking_mode: "Auto",
+        thinking_format: "summary",
+        auto_search: true,
+      },
+      extra: { meta: { subChatType: "t2t" } },
+      sub_chat_type: "t2t",
+      parent_id: parentId,
+    }];
 
     return {
       stream: true,
@@ -251,16 +250,17 @@ class QwenProvider extends BaseProvider {
   async chat(messages: ChatMessage[]): Promise<ChatResponse> {
     // Use consistent IDs for this conversation session
     if (!this.chatId) this.chatId = crypto.randomUUID();
-    const parentId = crypto.randomUUID();
+    const parentId = this.lastMessageId || crypto.randomUUID();
     const model = process.env.QWEN_MODEL || "qwen3.6-plus";
 
+    // Build request body matching the web frontend packet capture format
     const requestBody = this.buildChatRequest(this.chatId, parentId, messages, model);
     const bodyStr = JSON.stringify(requestBody);
 
     const url = `${QWEN_API}?chat_id=${encodeURIComponent(this.chatId)}`;
     info(`[Qwen] Chat request: model=${model}, messages=${messages.length}, chatId=${this.chatId}`);
     info(`[Qwen API] POST ${url}`);
-    info(`[Qwen API] Request body: ${bodyStr.slice(0, 500)}`);
+    info(`[Qwen API] Request body: ${bodyStr.slice(0, 1000)}`);
 
     let content = "";
 
@@ -302,8 +302,11 @@ class QwenProvider extends BaseProvider {
 
         let accumulated = "";
         let buffer = "";
+        let rawReceived = 0;
 
         res.on("data", (chunk: Buffer) => {
+          rawReceived += chunk.length;
+          debug(`[Qwen SSE] Received chunk (${chunk.length} bytes): ${chunk.toString().slice(0, 300)}`);
           buffer += chunk.toString();
 
           // Process complete SSE lines
@@ -312,13 +315,17 @@ class QwenProvider extends BaseProvider {
 
           for (const line of lines) {
             const trimmed = line.trim();
-            if (!trimmed || !trimmed.startsWith("data:")) continue;
+            if (!trimmed || !trimmed.startsWith("data:")) {
+              debug(`[Qwen SSE] Skipping non-data line: ${trimmed.slice(0, 100)}`);
+              continue;
+            }
 
             const jsonStr = trimmed.slice(5).trim();
             if (!jsonStr) continue;
 
             try {
               const event = JSON.parse(jsonStr) as Record<string, unknown>;
+              debug(`[Qwen SSE] Parsed event keys: ${Object.keys(event).join(", ")}`);
 
               // Handle response.created event
               if (event["response.created"]) {
@@ -361,7 +368,7 @@ class QwenProvider extends BaseProvider {
         });
 
         res.on("end", () => {
-          info(`[Qwen SSE] Stream ended, total content: ${accumulated.length} chars`);
+          info(`[Qwen SSE] Stream ended, raw=${rawReceived} bytes, content=${accumulated.length} chars`);
           resolve(accumulated);
         });
 
