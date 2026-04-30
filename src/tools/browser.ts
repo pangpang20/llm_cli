@@ -1,5 +1,6 @@
 import puppeteer, { Browser, Page } from "puppeteer";
 import * as fs from "fs";
+import * as os from "os";
 import * as path from "path";
 import { Tool } from "./types";
 
@@ -31,9 +32,10 @@ function validateUrl(url: string): string | null {
 
 function validateScreenshotPath(filepath: string): string | null {
   const resolved = path.resolve(filepath);
-  if (resolved.startsWith("/tmp/")) return null;
+  const tmpDir = os.tmpdir();
+  if (resolved.startsWith(tmpDir + path.sep)) return null;
   if (resolved === PROJECT_ROOT || resolved.startsWith(PROJECT_ROOT + path.sep)) return null;
-  return `Error: Screenshot path must be within project directory or /tmp: ${resolved}`;
+  return `Error: Screenshot path must be within project directory or temp dir: ${resolved}`;
 }
 
 let browser: Browser | null = null;
@@ -47,7 +49,7 @@ async function getBrowser(): Promise<Browser> {
       throw new Error("Browser initialization failed after max retries");
     }
     initAttempts++;
-    const noSandbox = process.env.NO_SANDBOX === "1";
+    const noSandbox = process.env.NO_SANDBOX === "1" || process.getuid?.() === 0;
     browser = await puppeteer.launch({
       headless: true,
       args: noSandbox
