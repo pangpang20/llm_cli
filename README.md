@@ -35,6 +35,7 @@ LLM_PROVIDER=deepseek llmcli
 
 ### 核心功能
 - **多厂商支持** — Qwen、豆包、DeepSeek、Kimi 一键切换
+- **目录信任** — 首次在新目录运行时会提示安全确认，确认后记录到 `~/.llm_cli/trusted_dirs.json`
 - **浏览器登录** — 有浏览器环境：打开窗口扫码；无浏览器环境：截图展示二维码
 - **交互式 REPL** — 在终端中与 AI 自由对话
 - **多轮工具链** — AI 可以连续调用多个工具完成复杂任务
@@ -95,6 +96,26 @@ npm start
 - **npm** — 随 Node.js 一起安装
 - **Chrome/Chromium** — Puppeteer 会自动下载，或手动安装 `sudo apt install chromium-browser`
 - **Linux 无显示环境** — 需要安装 `xvfb` 或使用截图模式
+
+### 第零步：目录信任检查
+
+首次在一个新目录中运行 `llmcli` 时，会显示安全提示：
+
+```
+⚠ Security Warning
+─────────────────────────────────────────────────────
+This is the first time running in this directory:
+  /opt/llm_cli
+
+The AI agent in this tool can read files, execute commands, and
+modify files in the current directory and its subdirectories.
+
+Make sure you trust the contents of this directory before proceeding.
+─────────────────────────────────────────────────────
+Do you trust the files in this directory? (y/N)
+```
+
+输入 `y` 确认信任后，该目录会被记录到 `~/.llm_cli/trusted_dirs.json`，后续不再提示。如果不信任，程序会直接退出。
 
 ### 第一步：选择提供商
 
@@ -178,7 +199,7 @@ AI 会自动调用工具完成任务，返回结果后继续对话。
 | `/help` | 显示帮助信息 |
 | `/clear` | 清空当前对话历史 |
 | `/login` | 重新打开浏览器登录（Cookie 过期时使用） |
-| `/provider` | 列出所有可用的 AI 厂商 |
+| `/provider` | 交互式切换到其他 AI 厂商（需重启生效） |
 | `/memory` | 查看已学习的记忆和失败记录 |
 | `/quit` 或 `/exit` | 退出程序 |
 
@@ -219,6 +240,7 @@ NO_SANDBOX=1 npm start
 | `.llm_memory.json` | 自动进化记忆文件 |
 | `.llm_rules.json` | 自动学习的规则 |
 | `.llm_hooks.json` | 自动化钩子配置 |
+| `~/.llm_cli/trusted_dirs.json` | 已信任的目录列表 |
 
 ```bash
 # 强制重新登录
