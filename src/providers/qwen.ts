@@ -8,32 +8,23 @@ import { debug, info, error } from "../utils/logger";
 const QWEN_API = "https://chat.qwen.ai/api/v2/chat/completions";
 const QWEN_NEW_CHAT = "https://chat.qwen.ai/api/v2/chats/new";
 
-const QWEN_TOOL_INSTRUCTION = `Environment: Linux x86_64. Use Linux paths starting with the project root.
+const QWEN_TOOL_INSTRUCTION = `可用工具:
+- bash(command="...", timeout=30000)
+- read_file(file_path="...")
+- write_file(file_path="...", content="...")
+- edit_file(file_path="...", old_string="...", new_string="...")
+- browser_navigate(url="...")
+- browser_screenshot(path="...")
+- browser_text(selector="...")
+- browser_click(selector="...")
+- browser_type(selector="...", text="...")
 
-You MUST use tools for file/shell/browser tasks. Call tools using [TOOL_CALL:<name>(params)].
+调用格式: [TOOL_CALL:工具名(参数)]
 
-Tools you MUST use:
-  bash(command="...", timeout=30000) — Run shell commands
-  read_file(file_path="path") — Read a file
-  write_file(file_path="path", content="...") — Write file
-  edit_file(file_path="path", old_string="...", new_string="...") — Replace text
-  browser_navigate(url="https://...")
-  browser_screenshot(path="file.png")
-  browser_text(selector="css")
-  browser_click(selector="css")
-  browser_type(selector="css", text="...")
-
-Examples of CORRECT tool calls:
+示例:
 [TOOL_CALL:bash(command="ls -la", timeout=30000)]
-[TOOL_CALL:read_file(file_path="README.md")]
-
-WRONG (do NOT do this):
-[TOOL_CALL:toolname(command="...")]
-[TOOL_CALL:TOOLNAME(command="...")]
-[TOOL_CALL:your_tool(command="...")]
-
-ALWAYS use one of: bash, read_file, write_file, edit_file, browser_navigate, browser_screenshot, browser_text, browser_click, browser_type.
-When calling a tool, output ONLY the [TOOL_CALL:...] line.`;
+[TOOL_CALL:read_file(file_path="src/main.ts")]
+[TOOL_CALL:edit_file(file_path="app.py", old_string="a", new_string="b")]`;
 
 class QwenProvider extends BaseProvider {
   readonly info: ProviderInfo = {
