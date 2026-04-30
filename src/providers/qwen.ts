@@ -82,11 +82,25 @@ class QwenProvider extends BaseProvider {
     const browser = await puppeteer.launch({
       headless: false,
       userDataDir,
-      args: ["--no-sandbox", "--disable-setuid-sandbox"],
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-blink-features=AutomationControlled",
+      ],
     });
 
     try {
       const page = await browser.newPage();
+
+      // Hide webdriver fingerprint before any page loads
+      await page.evaluateOnNewDocument(() => {
+        Object.defineProperty(navigator, "webdriver", { get: () => false });
+        // @ts-ignore
+        window.chrome = { runtime: {} };
+        // @ts-ignore
+        delete navigator.__proto__.webdriver;
+      });
+
       await page.setViewport({ width: 1280, height: 800 });
       await page.goto(this.info.loginUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
 
