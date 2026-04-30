@@ -72,58 +72,125 @@ npm run build
 
 ## 使用
 
-### 1. 启动 & 登录
+### 前置要求
+
+- **Node.js v22+** — 运行 `node -v` 检查版本
+- **npm** — 随 Node.js 一起安装
+- **Chrome/Chromium** — Puppeteer 会自动下载，或手动安装 `sudo apt install chromium-browser`
+- **Linux 无显示环境** — 需要安装 `xvfb` 或使用截图模式
+
+### 第一步：安装
 
 ```bash
-# 默认使用 Qwen
+# 克隆仓库
+git clone git@github.com:pangpang20/llm_cli.git
+cd llm_cli
+
+# 安装依赖（会自动下载 Chromium）
+npm install
+
+# 编译 TypeScript
+npm run build
+```
+
+### 第二步：启动（首次登录）
+
+```bash
+# 默认使用通义千问
 npm start
-
-# 使用其他厂商
-LLM_PROVIDER=doubao npm start
 ```
 
-首次运行会自动打开浏览器（有显示环境）或展示截图（无显示环境）：
-1. 打开对应厂商的登录页面
-2. 扫码或输入账号密码登录
-3. 登录成功后浏览器自动关闭，认证信息保存到本地
+首次运行会自动打开浏览器窗口：
 
-之后 12 小时内再次运行无需登录。
+1. 浏览器自动打开，跳转到 **chat.qwen.ai**
+2. 页面显示二维码，用 **通义千问 App** 扫码
+3. 扫码成功后页面跳转，浏览器自动关闭
+4. 认证 Cookie 保存到 `.qwen_session.json`
+5. 进入对话界面，可以开始使用
 
-### 2. 无浏览器 Linux 服务器登录
+> **注意**：如果提示登录超时或失败，检查网络是否能访问 chat.qwen.ai
 
-在纯终端的 Linux 服务器上：
+### 第三步：开始对话
 
-```bash
-# 方式一：截图模式（程序会打印 base64 截图，需自行解码查看）
-NO_SANDBOX=1 npm start
-
-# 方式二：在其他机器登录后复制 session 文件
-# 将 .qwen_session.json 拷贝到服务器的项目目录即可
-```
-
-### 3. 开始对话
+启动成功后看到 `> ` 提示符，直接输入自然语言指令：
 
 ```
-=== LLM CLI Agent (Qwen) ===
-Type /help for commands. Ctrl+C to exit.
-
 > 帮我创建一个 Hello World 的 Python 脚本
 ```
 
-AI 会直接调用工具完成任务，无需手动操作。
+AI 会调用工具（创建文件、执行命令等）完成任务。多步任务会自动串联执行。
 
-### 4. 内置命令
+### 第四步：切换其他厂商
+
+```bash
+# 使用豆包
+LLM_PROVIDER=doubao npm start
+
+# 使用 DeepSeek
+LLM_PROVIDER=deepseek npm start
+
+# 使用 Kimi
+LLM_PROVIDER=kimi npm start
+```
+
+首次切换新厂商时会再次打开浏览器，扫码登录对应平台。登录后 Cookie 保存 12 小时，期间无需重复登录。
+
+## 详细使用指南
+
+### 常用对话示例
+
+```
+> 读取当前目录下 package.json 的内容
+
+> 把 src/index.ts 里的 chalk.red 全部改成 chalk.yellow
+
+> 运行 npm run build 并告诉我结果
+
+> 打开 https://example.com 截图给我看
+```
+
+AI 会自动调用工具完成任务，返回结果后继续对话。
+
+### 内置命令
+
+在对话中输入以下命令：
 
 | 命令 | 说明 |
 |------|------|
 | `/help` | 显示帮助信息 |
-| `/clear` | 清空对话历史 |
-| `/login` | 重新打开浏览器登录 |
-| `/provider` | 列出可用的 AI 厂商 |
-| `/memory` | 查看已学习的记忆和经验 |
+| `/clear` | 清空当前对话历史 |
+| `/login` | 重新打开浏览器登录（Cookie 过期时使用） |
+| `/provider` | 列出所有可用的 AI 厂商 |
+| `/memory` | 查看已学习的记忆和失败记录 |
 | `/quit` 或 `/exit` | 退出程序 |
 
-### 5. 会话管理
+### 无浏览器 Linux 服务器登录
+
+在纯终端的 Linux 服务器上有两种方式：
+
+**方式一：从其他机器复制 Session 文件（推荐）**
+
+1. 在你本地电脑上运行 `npm start`，完成登录
+2. 找到项目目录下的 `.qwen_session.json` 文件
+3. 将该文件复制到服务器的项目目录：
+   ```bash
+   scp .qwen_session.json user@server:/path/to/llm_cli/
+   ```
+4. 在服务器上直接运行 `npm start`，无需重新登录
+
+**方式二：截图模式**
+
+```bash
+# 设置 NO_SANDBOX=1 启动截图模式
+NO_SANDBOX=1 npm start
+```
+
+程序会将登录页面的截图以 base64 格式输出到终端。你需要：
+1. 将 base64 字符串解码为图片查看
+2. 用手机扫码（可以通过另一台设备打开对应网址）
+3. 扫码后程序会继续等待并检测登录状态
+
+### Session 管理
 
 | 文件 | 说明 |
 |------|------|
@@ -140,11 +207,12 @@ AI 会直接调用工具完成任务，无需手动操作。
 rm .qwen_session.json
 npm start
 
-# 查看学习到的经验
-# 在对话中输入 /memory
+# 查看自动学习到的经验
+# 在对话中输入 /memory 查看，或直接：
+cat .llm_memory.json
 ```
 
-### 6. 环境变量
+### 环境变量
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
