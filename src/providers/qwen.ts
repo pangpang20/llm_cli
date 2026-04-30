@@ -8,23 +8,8 @@ import { debug, info, error } from "../utils/logger";
 const QWEN_API = "https://chat.qwen.ai/api/v2/chat/completions";
 const QWEN_NEW_CHAT = "https://chat.qwen.ai/api/v2/chats/new";
 
-const QWEN_TOOL_INSTRUCTION = `可用工具:
-- bash(command="...", timeout=30000)
-- read_file(file_path="...")
-- write_file(file_path="...", content="...")
-- edit_file(file_path="...", old_string="...", new_string="...")
-- browser_navigate(url="...")
-- browser_screenshot(path="...")
-- browser_text(selector="...")
-- browser_click(selector="...")
-- browser_type(selector="...", text="...")
-
-调用格式: [TOOL_CALL:工具名(参数)]
-
-示例:
-[TOOL_CALL:bash(command="ls -la", timeout=30000)]
-[TOOL_CALL:read_file(file_path="src/main.ts")]
-[TOOL_CALL:edit_file(file_path="app.py", old_string="a", new_string="b")]`;
+const QWEN_TOOL_INSTRUCTION = `可用工具: bash, read_file, write_file, edit_file, browser_navigate, browser_screenshot, browser_text, browser_click, browser_type
+格式: [TOOL_CALL:工具名(参数)]`;
 
 class QwenProvider extends BaseProvider {
   readonly info: ProviderInfo = {
@@ -38,6 +23,7 @@ class QwenProvider extends BaseProvider {
   private chatId: string = "";
   private lastMessageId: string | null = null;
   private lastResponseId: string | null = null;
+  private toolIntroSent: boolean = false;
 
   protected isLoginComplete(): string {
     return `() => {
@@ -281,6 +267,82 @@ class QwenProvider extends BaseProvider {
     });
   }
 
+  /**
+   * Send a tool introduction message to the model after creating a new chat.
+   * This primes the model with tool knowledge before any user messages.
+   */
+  private async sendToolIntro(model: string): Promise<void> {
+    const introMessage = `请确认你了解以下可用的本地工具。当用户需要执行文件操作、运行命令或浏览器操作时，你必须使用以下工具：
+
+工具列表（工具名必须是精确匹配的英文）:
+1. bash — 运行shell命令。参数: command, timeout
+2. read_file — 读取文件。参数: file_path
+3. write_file — 写入文件。参数: file_path, content
+4. edit_file — 编辑文件。参数: file_path, old_string, new_string
+5. browser_navigate — 访问网页。参数: url
+6. browser_screenshot — 截图。参数: path
+7. browser_text — 提取网页文字。参数: selector
+8. browser_click — 点击。参数: selector
+9. browser_type — 输入文字。参数: selector, text
+
+调用格式: [TOOL_CALL:工具名(参数)]
+示例: [TOOL_CALL:bash(command="ls", timeout=30000)]
+
+请回复"了解"并列出你能使用的工具名称。`;
+
+    const timestamp = Math.floor(Date.now() / 1000);
+    const messageId = crypto.randomUUID();
+    const parentId = this.lastResponseId || "";
+
+    const apiMessages: Record<string, unknown>[] = [{
+      fid: messageId,
+      parentId: parentId || null,
+      childrenIds: [],
+      role: "user",
+      content: introMessage,
+      user_action: "chat",
+      files: [],
+      timestamp,
+      models: [model],
+      chat_type: "t2t",
+      feature_config: {
+        thinking_enabled: true,
+        output_schema: "phase",
+        research_mode: "normal",
+        auto_thinking: true,
+        thinking_mode: "Auto",
+        thinking_format: "summary",
+        auto_search: true,
+      },
+      extra: { meta: { subChatType: "t2t" } },
+      sub_chat_type: "t2t",
+    }];
+
+    const body = JSON.stringify({
+      stream: true,
+      version: "2.1",
+      incremental_output: true,
+      chat_id: this.chatId,
+      chat_mode: "normal",
+      model,
+      parent_id: parentId || null,
+      messages: apiMessages,
+      timestamp,
+    });
+
+    try {
+      const introResponse = await this.sseFetch(
+        `${QWEN_API}?chat_id=${encodeURIComponent(this.chatId)}`,
+        body,
+      );
+      info(`[Qwen] Tool intro response: ${introResponse.slice(0, 200)}`);
+      this.toolIntroSent = true;
+    } catch (err) {
+      info(`[Qwen] Tool intro failed (non-critical): ${err instanceof Error ? err.message : String(err)}`);
+      // Non-critical: continue without tool intro
+    }
+  }
+
   private buildChatRequest(
     chatId: string,
     parentId: string,
@@ -366,6 +428,12 @@ class QwenProvider extends BaseProvider {
         const message = err instanceof Error ? err.message : String(err);
         error(`[Qwen] Failed to create chat: ${message}`);
         throw new Error(`Failed to initialize chat: ${message}`);
+      }
+
+      // Send tool introduction after creating a new chat session
+      if (!this.toolIntroSent) {
+        info("[Qwen] Sending tool introduction message...");
+        await this.sendToolIntro(model);
       }
     }
     // For first message in chat, use empty string. For subsequent messages, use server's response_id.
