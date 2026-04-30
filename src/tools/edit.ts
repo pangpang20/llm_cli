@@ -2,6 +2,24 @@ import * as fs from "fs";
 import * as path from "path";
 import { Tool } from "./types";
 
+const SYSTEM_PATHS = ["/etc", "/usr", "/bin", "/sbin", "/var", "/root", "/boot", "/sys", "/proc"];
+const BLOCKED_PATTERNS = [".env", ".key", ".pem", ".secret", "credentials", "id_rsa", "shadow", "passwd"];
+
+function validatePath(resolved: string): string | null {
+  for (const sysPath of SYSTEM_PATHS) {
+    if (resolved.startsWith(sysPath + "/") || resolved === sysPath) {
+      return `Error: Cannot modify system path: ${resolved}`;
+    }
+  }
+  const base = path.basename(resolved).toLowerCase();
+  for (const pattern of BLOCKED_PATTERNS) {
+    if (base.includes(pattern)) {
+      return `Error: Cannot modify restricted file: ${base}`;
+    }
+  }
+  return null;
+}
+
 export const editFileTool: Tool = {
   name: "edit_file",
   description: "Edit a file by replacing exact text. The old_string must match exactly.",
@@ -28,6 +46,10 @@ export const editFileTool: Tool = {
     const oldStr = String(args.old_string);
     const newStr = String(args.new_string);
     const resolved = path.resolve(filePath);
+
+    const validationError = validatePath(resolved);
+    if (validationError) return validationError;
+
     if (!fs.existsSync(resolved)) {
       return `Error: File not found: ${resolved}`;
     }

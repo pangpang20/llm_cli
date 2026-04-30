@@ -9,13 +9,17 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "tsc --watch"
+    "dev": "tsc --watch",
+    "lint": "tsc --noEmit"
   },
+  "files": [
+    "dist/**/*"
+  ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/pangpang20/llm_cli.git"
   },
-  "keywords": [],
+  "keywords": ["cli", "llm", "agent", "dashscope", "qwen"],
   "author": "",
   "license": "ISC",
   "bugs": {
@@ -23,10 +27,12 @@
   },
   "homepage": "https://github.com/pangpang20/llm_cli#readme",
   "dependencies": {
-    "@types/node": "^25.6.0",
     "chalk": "^5.6.2",
     "openai": "^6.35.0",
-    "puppeteer": "^24.42.0",
+    "puppeteer": "^24.42.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0",
     "typescript": "^6.0.3"
   }
 }

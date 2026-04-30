@@ -1,7 +1,7 @@
-import { ChatMessage } from "./provider/dashscope";
+import OpenAI from "openai";
 
 export class ChatManager {
-  private messages: ChatMessage[] = [];
+  private messages: OpenAI.ChatCompletionMessageParam[] = [];
   private readonly systemPrompt: string;
 
   constructor(systemPrompt: string) {
@@ -19,22 +19,21 @@ export class ChatManager {
     this.messages.push({ role: "user", content });
   }
 
-  addAssistantMessage(content: string, toolCalls?: ChatMessage["tool_calls"]) {
-    const msg: ChatMessage = { role: "assistant", content };
+  addAssistantMessage(content: string, toolCalls?: OpenAI.ChatCompletionMessageToolCall[]) {
+    const msg: OpenAI.ChatCompletionAssistantMessageParam = { role: "assistant", content };
     if (toolCalls) msg.tool_calls = toolCalls;
     this.messages.push(msg);
   }
 
-  addToolResult(toolCallId: string, content: string, toolName: string) {
+  addToolResult(toolCallId: string, content: string, _toolName: string) {
     this.messages.push({
-      role: "assistant" as any,
+      role: "tool",
       content,
       tool_call_id: toolCallId,
-      name: toolName,
-    });
+    } as OpenAI.ChatCompletionToolMessageParam);
   }
 
-  getHistory(): ChatMessage[] {
+  getHistory(): OpenAI.ChatCompletionMessageParam[] {
     return [...this.messages];
   }
 

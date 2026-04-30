@@ -1,5 +1,17 @@
-import { exec } from "child_process";
+import { execFile } from "child_process";
 import { Tool } from "./types";
+
+const DANGEROUS_COMMANDS = ["rm -rf /", "mkfs", "dd if=", ":(){:|:&};:", "curl ", "wget ", "nc ", "ncat "];
+
+function isDangerous(cmd: string): string | null {
+  const lower = cmd.toLowerCase().trim();
+  for (const dangerous of DANGEROUS_COMMANDS) {
+    if (lower.startsWith(dangerous)) {
+      return `Command blocked by safety filter: "${dangerous}"`;
+    }
+  }
+  return null;
+}
 
 export const bashTool: Tool = {
   name: "bash",
@@ -21,12 +33,19 @@ export const bashTool: Tool = {
   async execute(args: Record<string, unknown>): Promise<string> {
     const command = String(args.command);
     const timeout = Number(args.timeout) || 30000;
+
+    const blocked = isDangerous(command);
+    if (blocked) return `Error: ${blocked}`;
+
     return new Promise((resolve) => {
-      const child = exec(command, { timeout }, (error, stdout, stderr) => {
+      execFile("/bin/sh", ["-c", command], { timeout }, (error, stdout, stderr) => {
         const parts: string[] = [];
         if (stdout) parts.push(`stdout:\n${stdout}`);
         if (stderr) parts.push(`stderr:\n${stderr}`);
-        if (error) parts.push(`error: ${error.message} (exit code: ${error.code})`);
+        if (error) {
+          const code = error.code ?? "unknown";
+          parts.push(`error: ${error.message} (exit code: ${code})`);
+        }
         if (parts.length === 0) {
           resolve("(command succeeded with no output)");
         } else {

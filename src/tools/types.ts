@@ -4,6 +4,12 @@ export interface ToolCall {
   arguments: Record<string, unknown>;
 }
 
+export interface OpenAIToolCall {
+  id: string;
+  type: "function";
+  function: { name: string; arguments: string };
+}
+
 export interface Tool {
   name: string;
   description: string;

@@ -9,6 +9,7 @@ import {
   browserTextTool,
   browserClickTool,
   browserTypeTool,
+  cleanupBrowser,
 } from "./browser";
 
 export const allTools: Tool[] = [
@@ -23,5 +24,5 @@ export const allTools: Tool[] = [
   browserTypeTool,
 ];
 
-export { Tool, ToolCall } from "./types";
-export { cleanupBrowser } from "./browser";
+export type { Tool, ToolCall } from "./types";
+export { cleanupBrowser };

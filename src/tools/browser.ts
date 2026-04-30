@@ -3,14 +3,55 @@ import * as fs from "fs";
 import * as path from "path";
 import { Tool } from "./types";
 
+const ALLOWED_PROTOCOLS = ["http:", "https:"];
+const BLOCKED_HOSTS = ["localhost", "127.0.0.1", "0.0.0.0", "::1"];
+const INTERNAL_PREFIXES = ["10.", "192.168.", "172.16.", "172.17.", "172.18.", "172.19.", "172.20.", "172.21.", "172.22.", "172.23.", "172.24.", "172.25.", "172.26.", "172.27.", "172.28.", "172.29.", "172.30.", "172.31.", "169.254."];
+
+function validateUrl(url: string): string | null {
+  try {
+    const parsed = new URL(url);
+    if (!ALLOWED_PROTOCOLS.includes(parsed.protocol)) {
+      return `Error: Protocol not allowed: ${parsed.protocol}`;
+    }
+    const hostname = parsed.hostname.toLowerCase();
+    if (BLOCKED_HOSTS.includes(hostname)) {
+      return `Error: Access to ${hostname} is blocked`;
+    }
+    for (const prefix of INTERNAL_PREFIXES) {
+      if (hostname.startsWith(prefix)) {
+        return `Error: Access to internal address ${hostname} is blocked`;
+      }
+    }
+  } catch {
+    return `Error: Invalid URL: ${url}`;
+  }
+  return null;
+}
+
+function validateScreenshotPath(filepath: string): string | null {
+  const resolved = path.resolve(filepath);
+  if (resolved.startsWith("/tmp/")) return null;
+  if (resolved.startsWith(process.cwd())) return null;
+  return `Error: Screenshot path must be within project directory or /tmp: ${resolved}`;
+}
+
 let browser: Browser | null = null;
 let page: Page | null = null;
+let initAttempts = 0;
+const MAX_INIT_ATTEMPTS = 3;
 
 async function getBrowser(): Promise<Browser> {
   if (!browser || !browser.isConnected()) {
+    if (initAttempts >= MAX_INIT_ATTEMPTS) {
+      throw new Error("Browser initialization failed after max retries");
+    }
+    initAttempts++;
+    const noSandbox = process.env.NO_SANDBOX === "1";
     browser = await puppeteer.launch({
       headless: true,
-      args: ["--no-sandbox", "--disable-setuid-sandbox"],
+      args: noSandbox
+        ? ["--no-sandbox", "--disable-setuid-sandbox"]
+        : [],
     });
   }
   return browser;
@@ -40,6 +81,9 @@ export const browserNavigateTool: Tool = {
   },
   async execute(args: Record<string, unknown>): Promise<string> {
     const url = String(args.url);
+    const validationError = validateUrl(url);
+    if (validationError) return validationError;
+
     const p = await getPage();
     const response = await p.goto(url, { waitUntil: "networkidle2", timeout: 30000 });
     const title = await p.title();
@@ -68,6 +112,9 @@ export const browserScreenshotTool: Tool = {
     const p = await getPage();
     const screenshotPath = String(args.path || "screenshot.png");
     const resolved = path.resolve(screenshotPath);
+
+    const pathError = validateScreenshotPath(resolved);
+    if (pathError) return pathError;
 
     let buffer: Uint8Array;
     if (args.selector) {
@@ -167,5 +214,6 @@ export async function cleanupBrowser() {
     await browser.close();
     browser = null;
     page = null;
+    initAttempts = 0;
   }
 }

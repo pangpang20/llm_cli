@@ -1,5 +1,6 @@
 import * as readline from "readline";
 import chalk from "chalk";
+import OpenAI from "openai";
 import { DashScopeProvider } from "./provider/dashscope";
 import { ChatManager } from "./chat";
 import { allTools, cleanupBrowser } from "./tools";
@@ -55,9 +56,21 @@ function createUI() {
     output: process.stdout,
   });
 
+  rl.on("error", (err) => {
+    console.error(chalk.red(`Readline error: ${err.message}`));
+    rl.close();
+  });
+
   return {
     prompt: (query: string = "> "): Promise<string> =>
-      new Promise((resolve) => rl.question(query, resolve)),
+      new Promise((resolve, reject) => {
+        rl.question(query, (answer) => {
+          resolve(answer);
+        });
+        rl.once("close", () => {
+          reject(new Error("EOF"));
+        });
+      }),
     close: () => rl.close(),
   };
 }
@@ -137,42 +150,49 @@ async function main() {
         const message = choice.message;
 
         if (message?.tool_calls && message.tool_calls.length > 0) {
-          // Show thinking indicator
           console.log(chalk.gray("  thinking..."));
 
           // Add assistant message with tool calls
-          chat.addAssistantMessage(message.content || "", message.tool_calls as any);
+          chat.addAssistantMessage(message.content || "", message.tool_calls);
 
-          // Execute each tool call
-          for (const tc of message.tool_calls) {
-            const tcFn = tc.type === "function" ? tc.function : (tc as any).function;
-            const toolName = tcFn.name;
-            let toolArgs: Record<string, unknown>;
-            try {
-              toolArgs = JSON.parse(tcFn.arguments);
-            } catch {
-              toolArgs = {};
-            }
+          // Execute tool calls in parallel
+          const results = await Promise.all(
+            message.tool_calls.map(async (tc) => {
+              const fn = tc.type === "function"
+                ? (tc as OpenAI.ChatCompletionMessageFunctionToolCall).function
+                : undefined;
+              const toolName = fn?.name ?? "unknown";
+              let toolArgs: Record<string, unknown>;
+              try {
+                toolArgs = JSON.parse(fn?.arguments ?? "{}");
+              } catch {
+                toolArgs = {};
+              }
 
-            printToolCall(toolName, toolArgs);
+              printToolCall(toolName, toolArgs);
 
-            const tool = getToolByName(toolName);
-            if (!tool) {
-              chat.addToolResult(tc.id, `Error: Unknown tool "${toolName}"`, toolName);
-              continue;
-            }
+              const tool = getToolByName(toolName);
+              if (!tool) {
+                return { toolCallId: tc.id, result: `Error: Unknown tool "${toolName}"`, toolName };
+              }
 
-            try {
-              const result = await tool.execute(toolArgs);
-              chat.addToolResult(tc.id, result, toolName);
-              printToolResult(result);
-            } catch (err: any) {
-              const errorResult = `Error: ${err.message}`;
-              chat.addToolResult(tc.id, errorResult, toolName);
-              printToolResult(errorResult);
-            }
+              try {
+                const result = await tool.execute(toolArgs);
+                return { toolCallId: tc.id, result, toolName };
+              } catch (err: unknown) {
+                const message = err instanceof Error ? err.message : String(err);
+                const errorResult = `Error: ${message}`;
+                return { toolCallId: tc.id, result: errorResult, toolName };
+              }
+            })
+          );
+
+          // Add tool results to chat history
+          for (const { toolCallId, result, toolName } of results) {
+            chat.addToolResult(toolCallId, result, toolName);
+            printToolResult(result);
           }
-          // Continue the loop - LLM will decide next action
+
           hasToolCall = true;
         } else {
           // No tool calls - just text response
@@ -181,8 +201,9 @@ async function main() {
           chat.addAssistantMessage(content);
           hasToolCall = false;
         }
-      } catch (err: any) {
-        console.error(chalk.red(`Error: ${err.message}`));
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error(chalk.red(`Error: ${message}`));
         hasToolCall = false;
       }
     }
