@@ -68,17 +68,7 @@ export abstract class BaseProvider {
   }
 
   loadSession(): Cookie[] | null {
-    const file = this.getSessionFilePath();
-    if (!fs.existsSync(file)) return null;
-    try {
-      const data = JSON.parse(fs.readFileSync(file, "utf-8"));
-      const savedAt = new Date(data.savedAt);
-      const now = new Date();
-      if (now.getTime() - savedAt.getTime() > 12 * 60 * 60 * 1000) return null;
-      return data.cookies;
-    } catch {
-      return null;
-    }
+    return null;
   }
 
   saveSession(cookies: Cookie[]): void {
