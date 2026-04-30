@@ -2,14 +2,12 @@ import * as fs from "fs";
 import * as path from "path";
 import { Tool } from "./types";
 
-const SYSTEM_PATHS = ["/etc", "/usr", "/bin", "/sbin", "/var", "/root", "/boot", "/sys", "/proc"];
+const PROJECT_ROOT = process.cwd();
 const BLOCKED_PATTERNS = [".env", ".key", ".pem", ".secret", "credentials", "id_rsa", "shadow", "passwd"];
 
 function validatePath(resolved: string): string | null {
-  for (const sysPath of SYSTEM_PATHS) {
-    if (resolved.startsWith(sysPath + "/") || resolved === sysPath) {
-      return `Error: Cannot modify system path: ${resolved}`;
-    }
+  if (resolved !== PROJECT_ROOT && !resolved.startsWith(PROJECT_ROOT + path.sep)) {
+    return `Error: Path traversal blocked: ${resolved} is outside the project directory`;
   }
   const base = path.basename(resolved).toLowerCase();
   for (const pattern of BLOCKED_PATTERNS) {

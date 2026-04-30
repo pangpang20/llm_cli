@@ -2,17 +2,13 @@ import * as fs from "fs";
 import * as path from "path";
 import { Tool } from "./types";
 
-const SAFE_DIRS = ["/tmp", "/dev/null"];
+const PROJECT_ROOT = process.cwd();
 
-function resolveAndValidate(filePath: string): string {
-  const resolved = path.resolve(filePath);
-  if (!resolved.startsWith(process.cwd())) {
-    const isSafeDir = SAFE_DIRS.some((d) => resolved.startsWith(d));
-    if (!isSafeDir) {
-      return `__ERROR__:Path traversal blocked: ${resolved} is outside the project directory`;
-    }
+function validatePath(resolved: string): string | null {
+  if (resolved !== PROJECT_ROOT && !resolved.startsWith(PROJECT_ROOT + path.sep)) {
+    return `Error: Path traversal blocked: ${resolved} is outside the project directory`;
   }
-  return resolved;
+  return null;
 }
 
 export const readFileTool: Tool = {
@@ -30,8 +26,11 @@ export const readFileTool: Tool = {
   },
   async execute(args: Record<string, unknown>): Promise<string> {
     const filePath = String(args.file_path);
-    const resolved = resolveAndValidate(filePath);
-    if (resolved.startsWith("__ERROR__:")) return resolved.replace("__ERROR__:", "Error: ");
+    const resolved = path.resolve(filePath);
+
+    const pathError = validatePath(resolved);
+    if (pathError) return pathError;
+
     if (!fs.existsSync(resolved)) {
       return `Error: File not found: ${resolved}`;
     }
