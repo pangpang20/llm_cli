@@ -138,7 +138,7 @@ class QwenProvider extends BaseProvider {
       }, 2000);
 
       // Timeout fallback after 5 minutes
-      await new Promise<void>((resolve) => {
+      const timeoutPromise = new Promise<void>((resolve) => {
         setTimeout(() => {
           if (done) { resolve(); return; }
           clearInterval(pollInterval);
@@ -151,6 +151,15 @@ class QwenProvider extends BaseProvider {
           });
         }, 300000);
       });
+
+      // Poll completion checker: resolve immediately when done becomes true
+      const doneCheck = new Promise<void>((resolve) => {
+        const check = setInterval(() => {
+          if (done) { clearInterval(check); resolve(); }
+        }, 200);
+      });
+
+      await Promise.race([doneCheck, timeoutPromise]);
 
       // Extract cookies from all relevant domains
       const allCookies = await page.cookies();
