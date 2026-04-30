@@ -54,8 +54,8 @@ export function log(level: "INFO" | "WARN" | "ERROR" | "DEBUG", message: string)
     logFileHandle.write(logLine);
   }
 
-  // Also output to console for DEBUG level or errors
-  if (level === "ERROR" || level === "DEBUG" || process.env.LLMCLI_DEBUG === "1") {
+  // Only output to console for errors, or DEBUG when explicitly enabled
+  if (level === "ERROR" || process.env.LLMCLI_DEBUG === "1") {
     console.log(logLine.trim());
   }
 }
