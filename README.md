@@ -23,10 +23,12 @@
 | Kimi | `kimi` | kimi.moonshot.cn |
 
 切换厂商：
+
+启动时会自动显示厂商选择菜单，输入数字即可。也可以使用环境变量指定：
+
 ```bash
-LLM_PROVIDER=doubao npm start
-LLM_PROVIDER=deepseek npm start
-LLM_PROVIDER=kimi npm start
+LLM_PROVIDER=doubao llmcli
+LLM_PROVIDER=deepseek llmcli
 ```
 
 ## 功能特性
@@ -58,28 +60,7 @@ LLM_PROVIDER=kimi npm start
 
 ## 安装
 
-```bash
-# 克隆仓库
-git clone git@github.com:pangpang20/llm_cli.git
-cd llm_cli
-
-# 安装依赖
-npm install
-
-# 编译 TypeScript
-npm run build
-```
-
-## 使用
-
-### 前置要求
-
-- **Node.js v22+** — 运行 `node -v` 检查版本
-- **npm** — 随 Node.js 一起安装
-- **Chrome/Chromium** — Puppeteer 会自动下载，或手动安装 `sudo apt install chromium-browser`
-- **Linux 无显示环境** — 需要安装 `xvfb` 或使用截图模式
-
-### 第一步：安装
+### 本地安装（推荐）
 
 ```bash
 # 克隆仓库
@@ -91,9 +72,46 @@ npm install
 
 # 编译 TypeScript
 npm run build
+
+# 链接到全局命令（创建 llmcli 命令）
+npm link
 ```
 
-### 第二步：启动（首次登录）
+安装后即可在任意目录使用 `llmcli` 命令。
+
+### 或者直接运行
+
+不想全局链接的话，在克隆目录下直接运行：
+
+```bash
+npm start
+```
+
+## 使用
+
+### 前置要求
+
+- **Node.js v22+** — 运行 `node -v` 检查版本
+- **npm** — 随 Node.js 一起安装
+- **Chrome/Chromium** — Puppeteer 会自动下载，或手动安装 `sudo apt install chromium-browser`
+- **Linux 无显示环境** — 需要安装 `xvfb` 或使用截图模式
+
+### 第一步：选择提供商
+
+启动后会自动显示菜单：
+
+```
+Select AI Provider:
+────────────────────────────────────────
+  1. Qwen (default)
+  2. Doubao (豆包)
+  3. DeepSeek
+  4. Kimi (月之暗面)
+────────────────────────────────────────
+Provider (1-4) [1]:
+```
+
+输入对应数字或直接按回车选择默认（Qwen）。
 
 ```bash
 # 默认使用通义千问
@@ -110,7 +128,7 @@ npm start
 
 > **注意**：如果提示登录超时或失败，检查网络是否能访问 chat.qwen.ai
 
-### 第三步：开始对话
+### 第二步：开始对话
 
 启动成功后看到 `> ` 提示符，直接输入自然语言指令：
 
@@ -120,7 +138,7 @@ npm start
 
 AI 会调用工具（创建文件、执行命令等）完成任务。多步任务会自动串联执行。
 
-### 第四步：切换其他厂商
+### 第三步：切换其他厂商
 
 ```bash
 # 使用豆包

@@ -15,7 +15,11 @@
       "Bash(gh api *)",
       "Bash(git reset *)",
       "Bash(git checkout *)",
-      "Bash(git rm *)"
+      "Bash(git rm *)",
+      "Bash(timeout 5 node /opt/llm_cli/build/index.js)",
+      "Bash(npm run *)",
+      "Bash(cat)",
+      "Bash(node /tmp/test_toolparse.mjs)"
     ]
   }
 }

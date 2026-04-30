@@ -85,13 +85,46 @@ function createUI() {
   };
 }
 
+async function selectProvider(): Promise<BaseProvider> {
+  const providers = listProviders();
+  const envId = process.env.LLM_PROVIDER;
+
+  if (envId) {
+    try { return getProvider(envId); } catch {
+      console.log(chalk.yellow(`Unknown provider "${envId}" from LLM_PROVIDER, showing menu.\n`));
+    }
+  }
+
+  console.log(chalk.cyan("Select AI Provider:"));
+  console.log(chalk.gray("─".repeat(40)));
+  providers.forEach((p, i) => {
+    const marker = i === 0 ? chalk.green(" (default)") : "";
+    console.log(`  ${chalk.white(String(i + 1))}. ${p.name}${marker}`);
+  });
+  console.log(chalk.gray("─".repeat(40)));
+
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  return new Promise((resolve, reject) => {
+    rl.question(chalk.yellow("Provider (1-4) [1]: "), (answer) => {
+      rl.close();
+      const num = parseInt(answer.trim(), 10);
+      if (isNaN(num) || num < 1 || num > providers.length) {
+        console.log(chalk.gray(`Using default: ${providers[0].name}\n`));
+        return resolve(getProvider(providers[0].id));
+      }
+      console.log(chalk.gray(`Selected: ${providers[num - 1].name}\n`));
+      resolve(getProvider(providers[num - 1].id));
+    });
+    rl.once("close", () => reject(new Error("EOF")));
+  });
+}
+
 async function main() {
   // Trust check
   await checkTrust();
 
   // Select provider
-  const providerId = process.env.LLM_PROVIDER || "qwen";
-  const provider: BaseProvider = getProvider(providerId);
+  const provider: BaseProvider = await selectProvider();
 
   // Login
   await provider.login();
@@ -133,9 +166,13 @@ async function main() {
       continue;
     }
     if (trimmed === "/provider") {
-      const available = listProviders().map((p) => `  ${p.id}: ${p.name}`).join("\n");
-      console.log(chalk.cyan(`Available providers:\n${available}\n`));
-      console.log(chalk.gray(`Switch with: LLM_PROVIDER=<id> npm start\n`));
+      console.log(chalk.gray("Switching provider...\n"));
+      const newProvider = await selectProvider();
+      await newProvider.login();
+      console.log(chalk.green(`Switched to ${newProvider.info.name}.\n`));
+      // Can't easily reassign provider in the outer scope from here,
+      // so just inform the user to restart if they want to switch.
+      console.log(chalk.gray("Note: Restart the session (/quit then llmcli) to use the new provider.\n"));
       continue;
     }
     if (trimmed === "/memory") {

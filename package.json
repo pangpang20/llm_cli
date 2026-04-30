@@ -4,16 +4,18 @@
   "description": "CLI agent tool - terminal-based AI assistant with file, shell, and browser tools",
   "main": "dist/index.js",
   "bin": {
-    "llm-cli": "./dist/index.js"
+    "llmcli": "./bin/llmcli"
   },
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
     "dev": "tsc --watch",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "postinstall": "chmod +x bin/llmcli && npm link 2>/dev/null || true"
   },
   "files": [
-    "dist/**/*"
+    "dist/**/*",
+    "bin/**/*"
   ],
   "repository": {
     "type": "git",
