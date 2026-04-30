@@ -9,5 +9,17 @@ dist/
 
 # Session / credentials
 .qwen_session.json
+.doubao_session.json
+.deepseek_session.json
+.kimi_session.json
 *.png
+
+# Harness / memory
+.llm_memory.json
+.llm_rules.json
+.llm_hooks.json
+
+# Generated / test artifacts
+audit/
+test/
 

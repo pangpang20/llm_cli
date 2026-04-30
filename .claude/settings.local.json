@@ -12,8 +12,10 @@
       "WebFetch(domain:chat.qwen.ai)",
       "WebSearch",
       "WebFetch(domain:github.com)",
-      "Bash(cat)",
-      "Bash(node /tmp/test_provider_debug.mjs)"
+      "Bash(gh api *)",
+      "Bash(git reset *)",
+      "Bash(git checkout *)",
+      "Bash(git rm *)"
     ]
   }
 }
