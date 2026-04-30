@@ -4,6 +4,7 @@ import * as path from "path";
 import * as readline from "readline";
 import * as os from "os";
 import chalk from "chalk";
+import { info } from "../utils/logger";
 
 export interface ChatMessage {
   role: "system" | "user" | "assistant";
@@ -119,13 +120,16 @@ export abstract class BaseProvider {
   async login(): Promise<Cookie[]> {
     const existing = this.loadSession();
     if (existing && existing.length > 0) {
+      info(`[${this.info.name}] Using cached session, ${existing.length} cookies`);
       console.log(chalk.gray(`Using cached session for ${this.info.name}...`));
       return existing;
     }
 
+    info(`[${this.info.name}] No cached session, starting login`);
     console.log(chalk.cyan(`\n[${this.info.name}] Logging in...`));
 
     const hasDisplay = process.env.DISPLAY !== undefined;
+    info(`[${this.info.name}] Platform display=${hasDisplay}, using ${hasDisplay ? "visible" : "screenshot"} mode`);
     if (!hasDisplay) {
       console.log(chalk.yellow("No display detected. Using screenshot mode for login."));
       return this.loginWithScreenshot();
@@ -136,23 +140,47 @@ export abstract class BaseProvider {
 
     try {
       const page = await browser.newPage();
+      info(`[${this.info.name}] Browser launched`);
+
       await page.setViewport({ width: 1280, height: 800 });
+      info(`[${this.info.name}] Navigating to ${this.info.loginUrl}`);
       await page.goto(this.info.loginUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
 
       console.log(`Please login at ${this.info.loginUrl}`);
       console.log("Timeout: 5 minutes.\n");
 
-      await page.waitForFunction(this.isLoginComplete(), { timeout: 300000, polling: 500 });
+      info(`[${this.info.name}] Waiting for user to complete login...`);
+      const rl = readline.createInterface({ input: process.stdin });
+      await new Promise<void>((resolve) => {
+        rl.question("Press Enter after you've logged in: ", () => {
+          rl.close();
+          resolve();
+        });
+      });
+
+      // Refresh to capture final login state
+      info(`[${this.info.name}] Reloading page to capture cookies`);
+      await page.reload({ waitUntil: "domcontentloaded" }).catch(() => { /* ignore */ });
       await new Promise((r) => setTimeout(r, 3000));
 
       const cookies = await page.cookies();
+      info(`[${this.info.name}] Total cookies: ${cookies.length}`);
       const authCookies = this.extractAuthCookies(cookies);
+      info(`[${this.info.name}] Auth cookies: ${authCookies.length}, names: ${authCookies.map(c => c.name).join(", ")}`);
 
       await browser.close();
-      this.saveSession(authCookies);
-      console.log(chalk.green("Login successful!\n"));
-      return authCookies;
+
+      if (authCookies.length > 0) {
+        this.saveSession(authCookies);
+        info(`[${this.info.name}] Login successful!`);
+        console.log(chalk.green("Login successful!\n"));
+        return authCookies;
+      } else {
+        info(`[${this.info.name}] No auth cookies found after login`);
+        throw new Error("Login completed but no auth cookies were found. Please try again.");
+      }
     } catch (err) {
+      info(`[${this.info.name}] Login error: ${err instanceof Error ? err.message : String(err)}`);
       try { await browser.close(); } catch { /* ignore */ }
       throw new Error(`Login failed: ${err instanceof Error ? err.message : String(err)}`);
     }
@@ -162,17 +190,20 @@ export abstract class BaseProvider {
    * Headless login: show URL and wait for user to complete login in their own browser
    */
   async loginWithScreenshot(): Promise<Cookie[]> {
+    info(`[${this.info.name}] Starting headless login via URL`);
     const browser = await this.launchBrowser();
 
     try {
       const page = await browser.newPage();
       await page.setViewport({ width: 1280, height: 800 });
+      info(`[${this.info.name}] Navigating to ${this.info.loginUrl}`);
       await page.goto(this.info.loginUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
 
       // Show the login URL for users to open in their browser
       console.log(chalk.cyan(`\nOpen this URL in your browser to log in:`));
       console.log(chalk.white(`  ${this.info.loginUrl}\n`));
 
+      info(`[${this.info.name}] Waiting for user confirmation...`);
       const rl = readline.createInterface({ input: process.stdin });
       await new Promise<void>((resolve) => {
         rl.question("Press Enter after you've logged in: ", () => {
@@ -181,20 +212,28 @@ export abstract class BaseProvider {
         });
       });
 
+      // Refresh to capture final login state
+      info(`[${this.info.name}] Reloading page to capture cookies`);
+      await page.reload({ waitUntil: "domcontentloaded" }).catch(() => { /* ignore */ });
       await new Promise((r) => setTimeout(r, 3000));
 
       const cookies = await page.cookies();
+      info(`[${this.info.name}] Total cookies: ${cookies.length}`);
       const authCookies = this.extractAuthCookies(cookies);
+      info(`[${this.info.name}] Auth cookies: ${authCookies.length}, names: ${authCookies.map(c => c.name).join(", ")}`);
 
       if (authCookies.length === 0) {
+        info(`[${this.info.name}] No auth cookies found`);
         throw new Error("No auth cookies found. Login may not have completed.");
       }
 
       await browser.close();
       this.saveSession(authCookies);
+      info(`[${this.info.name}] Login successful`);
       console.log(chalk.green("Login successful!\n"));
       return authCookies;
     } catch (err) {
+      info(`[${this.info.name}] Login error: ${err instanceof Error ? err.message : String(err)}`);
       try { await browser.close(); } catch { /* ignore */ }
       throw new Error(`Login failed: ${err instanceof Error ? err.message : String(err)}`);
     }

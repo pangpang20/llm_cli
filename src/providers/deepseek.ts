@@ -1,6 +1,7 @@
 import * as https from "https";
 import { Cookie } from "puppeteer";
 import { BaseProvider, ChatMessage, ChatResponse, ProviderInfo } from "./base";
+import { info } from "../utils/logger";
 
 const DEEPSEEK_API = "https://chat.deepseek.com/api/chat";
 
@@ -64,8 +65,10 @@ class DeepSeekProvider extends BaseProvider {
   }
 
   override async login(): Promise<Cookie[]> {
+    info("[DeepSeek] Starting login...");
     const cookies = await super.login();
     this.cookieString = cookies.map((c) => `${c.name}=${c.value}`).join("; ");
+    info(`[DeepSeek] Login successful, ${cookies.length} cookies`);
     return cookies;
   }
 

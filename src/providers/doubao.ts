@@ -2,6 +2,7 @@ import * as https from "https";
 import { Cookie } from "puppeteer";
 import { BaseProvider, ChatMessage, ChatResponse, ProviderInfo } from "./base";
 import chalk from "chalk";
+import { info } from "../utils/logger";
 
 const DOUBAO_API = "https://www.doubao.com/api/chat/v2";
 
@@ -82,8 +83,10 @@ class DoubaoProvider extends BaseProvider {
   }
 
   override async login(): Promise<Cookie[]> {
+    info("[Doubao] Starting login...");
     const cookies = await super.login();
     this.cookieString = cookies.map((c) => `${c.name}=${c.value}`).join("; ");
+    info(`[Doubao] Login successful, ${cookies.length} cookies`);
     return cookies;
   }
 

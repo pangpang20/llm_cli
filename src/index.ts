@@ -89,10 +89,12 @@ function createUI() {
 
 async function selectProvider(ui?: ReturnType<typeof createUI>): Promise<BaseProvider> {
   const providers = listProviders();
+  info(`Available providers: ${providers.map(p => p.name).join(", ")}`);
   const envId = process.env.LLM_PROVIDER;
 
   if (envId) {
     try { return getProvider(envId); } catch {
+      info(`Unknown provider "${envId}" from env, showing menu`);
       console.log(chalk.yellow(`Unknown provider "${envId}" from LLM_PROVIDER, showing menu.\n`));
     }
   }
@@ -118,11 +120,14 @@ async function selectProvider(ui?: ReturnType<typeof createUI>): Promise<BasePro
 
   const num = parseInt(answer.trim(), 10);
   if (isNaN(num) || num < 1 || num > providers.length) {
+    info(`Invalid input "${answer}", using default: ${providers[0].name}`);
     console.log(chalk.gray(`Using default: ${providers[0].name}\n`));
     return getProvider(providers[0].id);
   }
-  console.log(chalk.gray(`Selected: ${providers[num - 1].name}\n`));
-  return getProvider(providers[num - 1].id);
+  const selected = providers[num - 1];
+  info(`User selected: ${selected.name} (${selected.id})`);
+  console.log(chalk.gray(`Selected: ${selected.name}\n`));
+  return getProvider(selected.id);
 }
 
 function formatSessionExpiry(provider: BaseProvider): string {
@@ -153,15 +158,20 @@ async function main() {
   info("Trust check passed");
 
   // Select provider
+  info("Waiting for user to select provider...");
   let provider: BaseProvider = await selectProvider();
+  info(`Provider selected: ${provider.info.name} (${provider.info.id})`);
 
   // Login with retry on failure
   while (true) {
     try {
+      info(`[${provider.info.name}] Starting login...`);
       await provider.login();
+      info(`[${provider.info.name}] Login successful`);
       break; // Login succeeded
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      error(`[${provider.info.name}] Login failed: ${message}`);
       console.error(chalk.red(`\nLogin failed: ${message}\n`));
 
       const ui = createUI();
@@ -169,13 +179,16 @@ async function main() {
         chalk.yellow("Choose an option: [1] Retry login, [2] Switch provider, [3] Exit [1/2/3]: ")
       ).then(c => c.trim());
       ui.close();
+      info(`User chose option: ${choice}`);
 
       if (choice === "3") {
         info("User chose to exit after login failure");
         closeLogger();
         process.exit(1);
       } else if (choice === "2") {
+        info("User chose to switch provider");
         provider = await selectProvider();
+        info(`New provider selected: ${provider.info.name}`);
         // Fall through to retry with new provider
       }
       // choice === "1" or anything else: retry with current provider

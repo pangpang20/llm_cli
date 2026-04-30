@@ -45,20 +45,25 @@ class QwenProvider extends BaseProvider {
   override async login(): Promise<Cookie[]> {
     const existing = this.loadSession();
     if (existing && existing.length > 0) {
+      info(`[Qwen] Using cached session, ${existing.length} cookies`);
       console.log(chalk.gray(`Using cached session for ${this.info.name}...`));
       return existing;
     }
 
+    info(`[Qwen] No cached session, starting login flow`);
     console.log(chalk.cyan(`\n[${this.info.name}] Logging in...`));
 
     const hasDisplay = process.env.DISPLAY !== undefined;
     const isWindows = process.platform === "win32";
+    info(`[Qwen] Platform: ${isWindows ? "Windows" : process.platform}, DISPLAY=${process.env.DISPLAY || "unset"}`);
 
     if (!hasDisplay || isWindows) {
+      info(`[Qwen] Using visible browser login mode`);
       console.log(chalk.yellow(isWindows ? "Windows detected. Opening visible browser for login." : "No display detected. Opening visible browser for login."));
       return this.loginWithBrowser();
     }
 
+    info(`[Qwen] Using desktop mode with display`);
     console.log("Opening browser for login...");
     return super.login();
   }
@@ -91,6 +96,7 @@ class QwenProvider extends BaseProvider {
 
     try {
       const page = await browser.newPage();
+      info("[Qwen] Browser launched, new page created");
 
       // Hide webdriver fingerprint before any page loads
       await page.evaluateOnNewDocument(() => {
@@ -101,9 +107,11 @@ class QwenProvider extends BaseProvider {
         delete navigator.__proto__.webdriver;
       });
 
+      info(`[Qwen] Navigating to ${this.info.loginUrl}`);
       await page.setViewport({ width: 1280, height: 800 });
       await page.goto(this.info.loginUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
 
+      info("[Qwen] Page loaded, waiting for user login");
       console.log(chalk.green(`Opened ${this.info.loginUrl} in your browser.`));
       console.log(chalk.gray("Please complete login in the browser window.\n"));
 
@@ -117,14 +125,17 @@ class QwenProvider extends BaseProvider {
         // Check current page cookies
         const cookies = await page.cookies();
         const hasAuthCookies = cookies.some((c) => authCookieNames.includes(c.name));
+        info(`[Qwen] Polling: ${cookies.length} cookies, auth found=${hasAuthCookies}`);
 
         // Check if page navigated away from login page
         const currentUrl = page.url();
         const isLoggedInUrl = !currentUrl.includes("login") && !currentUrl.includes("signin") && currentUrl.includes("chat");
+        info(`[Qwen] Current URL: ${currentUrl}, logged_in=${isLoggedInUrl}`);
 
         if (hasAuthCookies || isLoggedInUrl) {
           clearInterval(pollInterval);
           done = true;
+          info("[Qwen] Login detected! Refreshing page to capture final state");
           // Refresh to capture final login state
           await page.reload({ waitUntil: "domcontentloaded" }).catch(() => { /* ignore reload errors */ });
           await new Promise((r) => setTimeout(r, 2000));
@@ -136,6 +147,7 @@ class QwenProvider extends BaseProvider {
         setTimeout(() => {
           if (done) { resolve(); return; }
           clearInterval(pollInterval);
+          info("[Qwen] Login polling timed out, asking user to confirm");
           const rl = readline.createInterface({ input: process.stdin });
           rl.question(chalk.yellow("Press Enter if you've completed login: "), () => {
             rl.close();
@@ -147,23 +159,29 @@ class QwenProvider extends BaseProvider {
 
       // Extract cookies from all relevant domains
       const allCookies = await page.cookies();
+      info(`[Qwen] Total cookies found: ${allCookies.length}`);
       const authCookies = this.extractAuthCookies(allCookies);
+      info(`[Qwen] Auth cookies found: ${authCookies.length}, names: ${authCookies.map(c => c.name).join(", ")}`);
 
       await browser.close();
       // Clean up temp directory
       try { fs.rmSync(userDataDir, { recursive: true, force: true }); } catch { /* ignore */ }
+      info("[Qwen] Browser closed, temp directory cleaned");
 
       if (authCookies.length > 0) {
         this.saveSession(authCookies);
+        info(`[Qwen] Login successful! Session saved to ${this.getSessionFilePath()}`);
         console.log(chalk.green("Login successful!\n"));
         return authCookies;
       } else {
+        info("[Qwen] Login failed: no auth cookies found");
         throw new Error(
           "Login completed but no auth cookies were found.\n" +
           "Make sure you completed login in the browser window, then try again."
         );
       }
     } catch (err) {
+      info(`[Qwen] Login error: ${err instanceof Error ? err.message : String(err)}`);
       try { await browser.close(); } catch { /* ignore */ }
       try { fs.rmSync(userDataDir, { recursive: true, force: true }); } catch { /* ignore */ }
       throw new Error(`Login failed: ${err instanceof Error ? err.message : String(err)}`);

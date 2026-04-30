@@ -1,6 +1,7 @@
 import * as https from "https";
 import { Cookie } from "puppeteer";
 import { BaseProvider, ChatMessage, ChatResponse, ProviderInfo } from "./base";
+import { info } from "../utils/logger";
 
 const KIMI_API = "https://kimi.moonshot.cn/api/chat";
 
@@ -64,8 +65,10 @@ class KimiProvider extends BaseProvider {
   }
 
   override async login(): Promise<Cookie[]> {
+    info("[Kimi] Starting login...");
     const cookies = await super.login();
     this.cookieString = cookies.map((c) => `${c.name}=${c.value}`).join("; ");
+    info(`[Kimi] Login successful, ${cookies.length} cookies`);
     return cookies;
   }
 
