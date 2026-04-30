@@ -160,6 +160,7 @@ async function main() {
   const ui = createUI();
 
   console.log(chalk.cyan(`=== LLM CLI Agent (${provider.info.name}) ===`));
+  console.log(chalk.gray("Author: chenyunliang <676814828@qq.com>"));
   console.log(chalk.gray("Type /help for commands. Ctrl+C to exit.\n"));
 
   while (true) {
