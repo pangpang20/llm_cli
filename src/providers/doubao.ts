@@ -1,6 +1,7 @@
 import * as https from "https";
 import { Cookie } from "puppeteer";
 import { BaseProvider, ChatMessage, ChatResponse, ProviderInfo } from "./base";
+import chalk from "chalk";
 
 const DOUBAO_API = "https://www.doubao.com/api/chat/v2";
 
@@ -52,12 +53,29 @@ class DoubaoProvider extends BaseProvider {
         let data = "";
         res.on("data", (chunk) => (data += chunk));
         res.on("end", () => {
-          try { resolve(JSON.parse(data)); } catch {
+          console.log(chalk.gray(`  [Doubao API] Status: ${res.statusCode}`));
+          console.log(chalk.gray(`  [Doubao API] Response length: ${data.length}`));
+          if (data.length === 0) {
+            console.log(chalk.red(`  [Doubao API] Empty response`));
+            reject(new Error("Empty response from API"));
+            return;
+          }
+          console.log(chalk.gray(`  [Doubao API] Response: ${data.slice(0, 500)}`));
+          try {
+            resolve(JSON.parse(data));
+          } catch (e) {
+            console.log(chalk.red(`  [Doubao API] Failed to parse JSON`));
             reject(new Error(`Failed to parse: ${data.slice(0, 500)}`));
           }
         });
       });
-      req.on("error", reject);
+      req.on("error", (err) => {
+        console.log(chalk.red(`  [Doubao API] Request error: ${err.message}`));
+        reject(err);
+      });
+      console.log(chalk.gray(`  [Doubao API] POST ${url}`));
+      console.log(chalk.gray(`  [Doubao API] Body: ${body.slice(0, 200)}`));
+      console.log(chalk.gray(`  [Doubao API] Cookies: ${this.cookieString.slice(0, 100)}...`));
       req.write(body);
       req.end();
     });
@@ -80,7 +98,10 @@ class DoubaoProvider extends BaseProvider {
     let response: Record<string, unknown>;
     try {
       response = await this.apiFetch(DOUBAO_API, body);
+      console.log(chalk.gray(`  [Doubao API] Parsed response: ${JSON.stringify(response).slice(0, 500)}`));
     } catch (err) {
+      console.log(chalk.red(`  [Doubao API] Error: ${err instanceof Error ? err.message : String(err)}`));
+      console.log(chalk.red(`  [Doubao API] Session file: ${this.getSessionFilePath()}`));
       throw new Error(
         `Doubao API failed: ${err instanceof Error ? err.message : String(err)}. ` +
         "Try removing .doubao_session.json and logging in again."

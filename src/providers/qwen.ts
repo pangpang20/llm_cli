@@ -3,6 +3,7 @@ import { Cookie } from "puppeteer";
 import { BaseProvider, ChatMessage, ChatResponse, ProviderInfo } from "./base";
 import * as readline from "readline";
 import chalk from "chalk";
+import { debug, info, error } from "../utils/logger";
 
 const QWEN_API = "https://chat.qwen.ai/api/chat";
 
@@ -135,8 +136,8 @@ class QwenProvider extends BaseProvider {
     return {
       "Content-Type": "application/json",
       Cookie: this.cookieString,
-      Origin: "https://tongyi.aliyun.com",
-      Referer: "https://tongyi.aliyun.com/",
+      Origin: "https://chat.qwen.ai",
+      Referer: "https://chat.qwen.ai/",
       "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     };
   }
@@ -148,12 +149,28 @@ class QwenProvider extends BaseProvider {
         let data = "";
         res.on("data", (chunk) => (data += chunk));
         res.on("end", () => {
-          try { resolve(JSON.parse(data)); } catch {
+          debug(`[Qwen API] Status: ${res.statusCode}`);
+          if (res.statusCode !== 200) {
+            error(`[Qwen API] HTTP ${res.statusCode}: ${data.slice(0, 500)}`);
+            reject(new Error(`HTTP ${res.statusCode}: ${data}`));
+            return;
+          }
+          try {
+            const json = JSON.parse(data);
+            debug(`[Qwen API] Response parsed OK`);
+            resolve(json);
+          } catch (e) {
+            error(`[Qwen API] Failed to parse JSON: ${data.slice(0, 200)}`);
             reject(new Error(`Failed to parse: ${data.slice(0, 500)}`));
           }
         });
       });
-      req.on("error", reject);
+      req.on("error", (err) => {
+        error(`[Qwen API] Request error: ${err.message}`);
+        reject(err);
+      });
+      debug(`[Qwen API] POST ${url}`);
+      debug(`[Qwen API] Body: ${body.slice(0, 200)}...`);
       req.write(body);
       req.end();
     });
@@ -170,7 +187,10 @@ class QwenProvider extends BaseProvider {
     let response: Record<string, unknown>;
     try {
       response = await this.apiFetch(QWEN_API, body);
+      console.log(chalk.gray(`  [Qwen API] Full response: ${JSON.stringify(response).slice(0, 500)}`));
     } catch (err) {
+      console.log(chalk.red(`  [Qwen API] Error details: ${err instanceof Error ? err.message : String(err)}`));
+      console.log(chalk.red(`  [Qwen API] Cookies: ${this.cookieString.slice(0, 100)}...`));
       throw new Error(
         `Qwen API failed: ${err instanceof Error ? err.message : String(err)}. ` +
         "Try removing .qwen_session.json and logging in again."

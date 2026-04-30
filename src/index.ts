@@ -6,6 +6,7 @@ import { BaseProvider, ChatMessage } from "./providers/base";
 import { cleanupBrowser } from "./tools";
 import { Harness } from "./harness";
 import { checkTrust, isTrusted } from "./harness/trust";
+import { initLogger, info, error, debug, closeLogger } from "./utils/logger";
 import {
   readFileTool, writeFileTool, editFileTool, bashTool,
   browserNavigateTool, browserScreenshotTool, browserTextTool,
@@ -143,8 +144,13 @@ function formatSessionExpiry(provider: BaseProvider): string {
 }
 
 async function main() {
+  // Initialize logger
+  initLogger();
+  info("=== LLM CLI Started ===");
+
   // Trust check
   await checkTrust();
+  info("Trust check passed");
 
   // Select provider
   const provider: BaseProvider = await selectProvider();
@@ -387,10 +393,14 @@ async function main() {
   await harness.onExit();
   ui.close();
   await cleanupBrowser();
+  info("=== LLM CLI Exited ===");
+  closeLogger();
   console.log(chalk.gray("Goodbye!"));
 }
 
 main().catch((err) => {
   console.error(err);
+  error(`Fatal error: ${err instanceof Error ? err.message : String(err)}`);
+  closeLogger();
   process.exit(1);
 });
