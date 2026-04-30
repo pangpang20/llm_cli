@@ -90,7 +90,7 @@ class DoubaoProvider extends BaseProvider {
     return cookies;
   }
 
-  async chat(messages: ChatMessage[]): Promise<ChatResponse> {
+  async chat(messages: ChatMessage[], _signal?: AbortSignal): Promise<ChatResponse> {
     const conversationText = messages
       .filter((m) => m.role !== "system")
       .map((m) => `${m.role}: ${m.content}`)

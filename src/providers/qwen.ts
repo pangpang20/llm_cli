@@ -359,7 +359,7 @@ class QwenProvider extends BaseProvider {
     return body as Record<string, unknown>;
   }
 
-  async chat(messages: ChatMessage[]): Promise<ChatResponse> {
+  async chat(messages: ChatMessage[], abortSignal?: AbortSignal): Promise<ChatResponse> {
     const model = process.env.QWEN_MODEL || "qwen3.6-plus";
 
     // Extract system prompt from messages (first system message)
@@ -393,7 +393,7 @@ class QwenProvider extends BaseProvider {
     let content = "";
 
     try {
-      content = await this.sseFetch(url, bodyStr);
+      content = await this.sseFetch(url, bodyStr, abortSignal);
       info(`[Qwen] Chat response: ${content.length} chars`);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -410,13 +410,19 @@ class QwenProvider extends BaseProvider {
   /**
    * Fetch SSE streaming response and accumulate assistant content
    */
-  private sseFetch(url: string, body: string): Promise<string> {
+  private sseFetch(url: string, body: string, abortSignal?: AbortSignal): Promise<string> {
     return new Promise((resolve, reject) => {
+      // Handle already-aborted signal
+      if (abortSignal?.aborted) {
+        return reject(new Error("Request cancelled"));
+      }
+
       const parsed = new URL(url);
       const req = https.request(parsed, {
         method: "POST",
         headers: this.buildHeaders(),
         timeout: 120000,
+        signal: abortSignal,
       }, (res) => {
         if (res.statusCode !== 200) {
           let errData = "";

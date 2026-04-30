@@ -310,7 +310,7 @@ async function main() {
 
   console.log(chalk.cyan(`=== LLM CLI Agent (${provider.info.name}) ===`));
   console.log(chalk.gray("Author: chenyunliang <676814828@qq.com>"));
-  console.log(chalk.gray("Type /help for commands. Ctrl+C to exit.\n"));
+  console.log(chalk.gray("Type /help for commands. Ctrl+C to exit. Press Esc to cancel response.\n"));
 
   while (true) {
     let input: string;
@@ -488,7 +488,8 @@ async function main() {
       console.log("  /quit       - Exit");
       console.log("  /help       - Show this help");
       console.log("\nJust type your message to start chatting.");
-      console.log("Use @path/to/file to attach file content to your message.\n");
+      console.log("Use @path/to/file to attach file content to your message.");
+      console.log("Press Esc during thinking to cancel the current request.\n");
       continue;
     }
 
@@ -497,10 +498,22 @@ async function main() {
     chatHistory.push({ role: "user", content: expandedInput });
 
     let maxToolRounds = 10;
+    let abortController: AbortController | null = null;
+
+    // Persistent ESC key listener — always active, only acts when controller is set
+    const escListener = (_str: string, key: { name: string }) => {
+      if (key.name === "escape" && abortController) {
+        abortController.abort();
+        console.log(chalk.yellow("\n  [Cancelled by user]"));
+      }
+    };
+    process.stdin.on("keypress", escListener);
+
     while (maxToolRounds > 0) {
       try {
-        console.log(chalk.gray("  thinking..."));
-        const response = await provider.chat(chatHistory);
+        abortController = new AbortController();
+        console.log(chalk.gray("  thinking... (Press Esc to cancel)"));
+        const response = await provider.chat(chatHistory, abortController.signal);
         const content = response.content.trim();
 
         const toolCall = parseToolCall(content);
@@ -518,12 +531,19 @@ async function main() {
         } else {
           console.log(chalk.white(content) + "\n");
           chatHistory.push({ role: "assistant", content });
+          abortController = null;
           break;
         }
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
+        // Don't show error for user cancellation
+        if (message === "Request cancelled" || message.includes("aborted")) {
+          abortController = null;
+          break;
+        }
         console.error(chalk.red(`Error: ${message}`));
         await harness.onError(message);
+        abortController = null;
         break;
       }
     }

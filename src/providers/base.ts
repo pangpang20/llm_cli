@@ -105,7 +105,7 @@ export abstract class BaseProvider {
   /**
    * Send a chat message to the API and return the response
    */
-  abstract chat(messages: ChatMessage[]): Promise<ChatResponse>;
+  abstract chat(messages: ChatMessage[], signal?: AbortSignal): Promise<ChatResponse>;
 
   async login(): Promise<Cookie[]> {
     const existing = this.loadSession();
