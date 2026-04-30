@@ -108,8 +108,11 @@ async function selectProvider(ui?: ReturnType<typeof createUI>): Promise<BasePro
     ? await ui.prompt(chalk.yellow("Provider (1-4) [1]: "))
     : await new Promise<string>((resolve, reject) => {
         const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-        rl.question(chalk.yellow("Provider (1-4) [1]: "), (a) => { rl.close(); resolve(a); });
-        rl.once("close", () => reject(new Error("EOF")));
+        let settled = false;
+        rl.question(chalk.yellow("Provider (1-4) [1]: "), (a) => {
+          if (!settled) { settled = true; rl.close(); resolve(a); }
+        });
+        rl.once("close", () => { if (!settled) reject(new Error("EOF")); });
       });
 
   const num = parseInt(answer.trim(), 10);
