@@ -26,10 +26,12 @@ class DoubaoProvider extends BaseProvider {
 
   protected extractAuthCookies(cookies: Cookie[]): Cookie[] {
     return cookies.filter(
-      (c) => c.domain.includes("doubao") ||
-             c.name.toLowerCase().includes("token") ||
-             c.name.toLowerCase().includes("session") ||
-             c.name.toLowerCase().includes("passport")
+      (c) => c.name === "token" ||
+             c.name === "session_id" ||
+             c.name === "sid" ||
+             c.name.startsWith("passport_") ||
+             c.name === "refresh_token" ||
+             (c.domain.includes("doubao") && (c.httpOnly || c.name.toLowerCase().includes("token")))
     );
   }
 

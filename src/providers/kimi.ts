@@ -26,10 +26,12 @@ class KimiProvider extends BaseProvider {
 
   protected extractAuthCookies(cookies: Cookie[]): Cookie[] {
     return cookies.filter(
-      (c) => c.domain.includes("moonshot") ||
-             c.name.toLowerCase().includes("token") ||
-             c.name.toLowerCase().includes("session") ||
-             c.name.toLowerCase().includes("auth")
+      (c) => c.name === "token" ||
+             c.name === "session_id" ||
+             c.name === "sid" ||
+             c.name.startsWith("auth_") ||
+             c.name === "refresh_token" ||
+             (c.domain.includes("moonshot") && (c.httpOnly || c.name.toLowerCase().includes("token")))
     );
   }
 

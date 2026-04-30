@@ -1,20 +1,23 @@
-import { exec } from "child_process";
+import { execFile } from "child_process";
 import { Tool } from "./types";
 
-// Minimal safety filter for destructive commands
-// This is a defense-in-depth measure, not a security boundary.
+// Block patterns for destructive commands
+// These catch common destructive patterns but cannot prevent all shell injection.
 // The tool runs in the user's trusted environment; the LLM acts on their behalf.
 const DESTRUCTIVE_PATTERNS: RegExp[] = [
-  /\brm\s+(-[rfRvf]+\s+)*\/\s*$/,        // rm -rf /
-  /\bmkfs\b/,                              // format filesystem
-  /\bdd\s+if=\//,                          // dd from device
-  /:\s*\{\s*:\s*\|/,                       // fork bomb
+  /\brm\s+(-[a-zA-Z]*[rRfF][a-zA-Z]*\s+)*(\/|\/\*|\.\.?\/)/,  // rm -rf /, rm -rf /*, rm -rf ./
+  /\brm\s+-[a-zA-Z]*[rRfF][a-zA-Z]*\s/,                         // rm -rf anything
+  /\bmkfs\b/,                                                     // format filesystem
+  /\bdd\s+(if=|of=)/,                                            // dd read/write
+  /:\s*\{\s*:\s*\|/,                                             // fork bomb
+  /\bchmod\s+[0-7]*777\s/,                                      // chmod 777
+  /\bchattr\s+(-|\+)i\b/,                                       // immutable attribute
 ];
 
 function isDestructive(cmd: string): string | null {
   for (const pattern of DESTRUCTIVE_PATTERNS) {
     if (pattern.test(cmd)) {
-      return `Command blocked: matches destructive pattern "${pattern.source}"`;
+      return `Command blocked: matches destructive pattern`;
     }
   }
   return null;
@@ -44,8 +47,8 @@ export const bashTool: Tool = {
     const blocked = isDestructive(command);
     if (blocked) return `Error: ${blocked}`;
 
-    return new Promise((resolve) => {
-      exec(command, { timeout }, (error, stdout, stderr) => {
+    return new Promise((resolve, reject) => {
+      execFile("/bin/sh", ["-c", command], { timeout }, (error, stdout, stderr) => {
         const parts: string[] = [];
         if (stdout) parts.push(`stdout:\n${stdout}`);
         if (stderr) parts.push(`stderr:\n${stderr}`);

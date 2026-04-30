@@ -21,6 +21,19 @@ const DEFAULT_HOOKS: HooksConfig = {
   on_exit: [],
 };
 
+// Only allow a safe subset of commands - no shell interpretation
+const ALLOWED_COMMANDS = ["echo", "ls", "cat", "date", "pwd", "whoami", "uptime", "hostname", "df", "free"];
+
+function isCommandSafe(command: string): boolean {
+  const trimmed = command.trim();
+  if (!trimmed) return false;
+  // Block shell metacharacters that could enable injection
+  if (/[;|&$`><(){}!\\]/.test(trimmed)) return false;
+  // Check if the base command is in the allowed list
+  const baseCmd = trimmed.split(/\s/)[0];
+  return ALLOWED_COMMANDS.includes(baseCmd);
+}
+
 export class Hooks {
   private config: HooksConfig;
 
@@ -31,7 +44,12 @@ export class Hooks {
   private load(): HooksConfig {
     if (!fs.existsSync(HOOKS_FILE)) return { ...DEFAULT_HOOKS };
     try {
-      return JSON.parse(fs.readFileSync(HOOKS_FILE, "utf-8"));
+      const parsed = JSON.parse(fs.readFileSync(HOOKS_FILE, "utf-8")) as HooksConfig;
+      // Validate structure and filter unsafe commands
+      for (const event of ["on_start", "on_error", "on_exit"] as const) {
+        parsed[event] = (parsed[event] || []).filter((h) => isCommandSafe(h.command));
+      }
+      return parsed;
     } catch {
       return { ...DEFAULT_HOOKS };
     }
@@ -42,6 +60,9 @@ export class Hooks {
   }
 
   addHook(event: keyof HooksConfig, name: string, command: string): void {
+    if (!isCommandSafe(command)) {
+      throw new Error(`Command blocked for safety: ${command}`);
+    }
     this.config[event].push({ name, command, enabled: true });
     this.save();
   }
@@ -55,9 +76,13 @@ export class Hooks {
     const hooks = this.config[event].filter((h) => h.enabled);
     for (const hook of hooks) {
       try {
-        await new Promise<void>((resolve) => {
-          const { exec } = require("child_process");
-          exec(hook.command, { timeout: 10000 }, () => resolve());
+        const { execFile } = require("child_process");
+        const parts = hook.command.split(/\s+/);
+        await new Promise<void>((resolve, reject) => {
+          execFile(parts[0], parts.slice(1), { timeout: 10000 }, (err: Error | null) => {
+            if (err) reject(err);
+            else resolve();
+          });
         });
       } catch {
         // Don't let hook failure break the app

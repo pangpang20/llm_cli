@@ -46,14 +46,16 @@ const TOOL_REGISTRY: Record<string, { execute: (args: Record<string, unknown>) =
 };
 
 function parseToolCall(text: string): { name: string; args: Record<string, unknown> } | null {
-  const match = text.match(/\[TOOL_CALL:(\w+)\(([^)]*)\)\]/);
+  const match = text.match(/\[TOOL_CALL:([a-zA-Z_]\w*)\((.*)\)\]/s);
   if (!match) return null;
   const name = match[1];
   const argsStr = match[2];
   const args: Record<string, unknown> = {};
   if (argsStr.trim()) {
-    for (const [, key, value] of argsStr.matchAll(/(\w+)="([^"]*)"/g)) {
-      args[key] = value;
+    // Parse key="value" pairs, handling escaped quotes
+    for (const [, key, value] of argsStr.matchAll(/(\w+)\s*=\s*"((?:[^"\\]|\\.)*)"/g)) {
+      // Unescape the value
+      args[key] = value.replace(/\\"/g, '"').replace(/\\n/g, "\n").replace(/\\\\/g, "\\");
     }
   }
   return { name, args };
