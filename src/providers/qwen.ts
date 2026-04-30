@@ -65,8 +65,8 @@ class QwenProvider extends BaseProvider {
 
   /**
    * Login by opening a visible browser and waiting for user to complete login
-   * Uses a single browser instance so cookies are properly captured
-   * Does NOT auto-detect login completion — user presses Enter when ready
+   * Auto-detects login by monitoring cookies and navigation
+   * Falls back to manual Enter after 5 minute timeout
    */
   async loginWithBrowser(): Promise<Cookie[]> {
     const puppeteer = await import("puppeteer");
@@ -107,20 +107,47 @@ class QwenProvider extends BaseProvider {
       console.log(chalk.green(`Opened ${this.info.loginUrl} in your browser.`));
       console.log(chalk.gray("Please complete login in the browser window.\n"));
 
-      // Wait for user to press Enter after completing login
-      const rl = readline.createInterface({ input: process.stdin });
+      // Auto-detect login completion by polling for auth cookies and navigation
+      const authCookieNames = ["token", "session_id", "sid", "refresh_token", "ctoken", "csrf"];
+      let done = false;
+
+      const pollInterval = setInterval(async () => {
+        if (done) return;
+
+        // Check current page cookies
+        const cookies = await page.cookies();
+        const hasAuthCookies = cookies.some((c) => authCookieNames.includes(c.name));
+
+        // Check if page navigated away from login page
+        const currentUrl = page.url();
+        const isLoggedInUrl = !currentUrl.includes("login") && !currentUrl.includes("signin") && currentUrl.includes("chat");
+
+        if (hasAuthCookies || isLoggedInUrl) {
+          clearInterval(pollInterval);
+          done = true;
+          // Refresh to capture final login state
+          await page.reload({ waitUntil: "domcontentloaded" }).catch(() => { /* ignore reload errors */ });
+          await new Promise((r) => setTimeout(r, 2000));
+        }
+      }, 2000);
+
+      // Timeout fallback after 5 minutes
       await new Promise<void>((resolve) => {
-        rl.question("Press Enter after you've logged in (Ctrl+C to cancel): ", () => {
-          rl.close();
-          resolve();
-        });
+        setTimeout(() => {
+          if (done) { resolve(); return; }
+          clearInterval(pollInterval);
+          const rl = readline.createInterface({ input: process.stdin });
+          rl.question(chalk.yellow("Press Enter if you've completed login: "), () => {
+            rl.close();
+            done = true;
+            resolve();
+          });
+        }, 300000);
       });
 
-      // Give the page a moment to finish any post-login redirects
-      await new Promise((r) => setTimeout(r, 3000));
-
-      const cookies = await page.cookies();
-      const authCookies = this.extractAuthCookies(cookies);
+      // Extract cookies from all relevant domains
+      const allCookies = await page.cookies();
+      const authCookies = this.extractAuthCookies(allCookies);
 
       await browser.close();
       // Clean up temp directory
