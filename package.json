@@ -1,0 +1,32 @@
+{
+  "name": "llm_cli",
+  "version": "0.1.0",
+  "description": "CLI agent tool - terminal-based AI assistant with file, shell, and browser tools",
+  "main": "dist/index.js",
+  "bin": {
+    "llm-cli": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsc --watch"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pangpang20/llm_cli.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/pangpang20/llm_cli/issues"
+  },
+  "homepage": "https://github.com/pangpang20/llm_cli#readme",
+  "dependencies": {
+    "@types/node": "^25.6.0",
+    "chalk": "^5.6.2",
+    "openai": "^6.35.0",
+    "puppeteer": "^24.42.0",
+    "typescript": "^6.0.3"
+  }
+}
