@@ -1,4 +1,4 @@
-import { execFile } from "child_process";
+import { exec } from "child_process";
 import { Tool } from "./types";
 
 // Block patterns for destructive commands
@@ -46,8 +46,8 @@ export const bashTool: Tool = {
     const blocked = isDestructive(command);
     if (blocked) return `Error: ${blocked}`;
 
-    return new Promise((resolve, reject) => {
-      execFile("/bin/sh", ["-c", command], { timeout }, (error, stdout, stderr) => {
+    return new Promise((resolve) => {
+      exec(command, { timeout, maxBuffer: 1024 * 1024 * 2 }, (error, stdout, stderr) => {
         const parts: string[] = [];
         if (stdout) parts.push(`stdout:\n${stdout}`);
         if (stderr) parts.push(`stderr:\n${stderr}`);

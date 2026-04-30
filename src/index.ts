@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as readline from "readline";
+import * as os from "os";
 import chalk from "chalk";
 import { getProvider, listProviders } from "./providers";
 import { BaseProvider, ChatMessage } from "./providers/base";
@@ -13,6 +14,13 @@ import {
   browserNavigateTool, browserScreenshotTool, browserTextTool,
   browserClickTool, browserTypeTool,
 } from "./tools";
+
+function buildSystemPrompt(harness: Harness, basePrompt: string): string {
+  const platform = os.platform();
+  const arch = os.arch();
+  const osInfo = `Environment: ${platform === "win32" ? "Windows" : platform === "darwin" ? "macOS" : "Linux"} ${arch}`;
+  return harness.buildSystemPrompt(`${basePrompt}\n\n${osInfo}`);
+}
 
 const BASE_SYSTEM_PROMPT = `You are a helpful AI assistant running in a terminal. You can help users with coding tasks, file operations, shell commands, and browsing the web.
 
@@ -301,8 +309,8 @@ async function main() {
   const harness = new Harness();
   await harness.onStart();
 
-  // Build system prompt with learned context
-  const systemPrompt = harness.buildSystemPrompt(BASE_SYSTEM_PROMPT);
+  // Build system prompt with learned context and OS info
+  const systemPrompt = buildSystemPrompt(harness, BASE_SYSTEM_PROMPT);
 
   const chatHistory: ChatMessage[] = [{ role: "system", content: systemPrompt }];
   const ui = createUI();
