@@ -15,7 +15,9 @@ import {
 
 const BASE_SYSTEM_PROMPT = `You are a helpful AI assistant running in a terminal. You can help users with coding tasks, file operations, shell commands, and browsing the web.
 
-When the user asks you to perform file operations, shell commands, or browser actions, respond with ONLY a tool call in this exact format:
+CRITICAL: You have access to LOCAL TOOLS. You MUST use them for any file operations, shell commands, or browser actions. NEVER say you cannot access the local filesystem.
+
+When you need to use a tool, respond with ONLY the tool call in this EXACT format (no other text):
 
 [TOOL_CALL:tool_name(arg1="value1", arg2="value2")]
 
@@ -34,7 +36,15 @@ Guidelines:
 - When you need to use a tool, respond with ONLY the tool call first. The system will execute it and send back the result.
 - After receiving a tool result, use it to continue helping the user.
 - If multiple tools are needed, use them one at a time in sequence.
-- Be concise. Show results clearly.`;
+- Be concise. Show results clearly.
+
+IMPORTANT EXAMPLES:
+- User asks to list files: [TOOL_CALL:bash(command="ls -la")]
+- User asks to read a file: [TOOL_CALL:read_file(file_path="README.md")]
+- User asks to run a command: [TOOL_CALL:bash(command="echo hello")]
+- User asks to edit a file: [TOOL_CALL:edit_file(file_path="test.py", old_string="old", new_string="new")]
+
+中文提示：当用户要求执行文件操作、命令行操作或浏览器操作时，你必须使用工具调用格式 [TOOL_CALL:...] 来响应。不要说"我无法访问你的系统"之类的话，你有工具可以使用。`;
 
 const TOOL_REGISTRY: Record<string, { execute: (args: Record<string, unknown>) => Promise<string> }> = {
   read_file: readFileTool,

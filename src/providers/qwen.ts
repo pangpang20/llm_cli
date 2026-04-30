@@ -271,24 +271,31 @@ class QwenProvider extends BaseProvider {
   ): Record<string, unknown> {
     const timestamp = Math.floor(Date.now() / 1000);
 
-    // Build only the current user message (no system/history in array)
-    // Server tracks conversation context via chat_id + parent_id
+    // Extract system prompt if present
+    const systemMessage = messages.find((m) => m.role === "system");
+    // Get last user message (or all user messages concatenated if no system prompt)
     const userMessages = messages.filter((m) => m.role === "user");
     const lastUserMessage = userMessages[userMessages.length - 1]?.content || "";
     const messageId = crypto.randomUUID();
     this.lastMessageId = messageId;
+
+    // Prepend system prompt to user message if present
+    let messageContent = lastUserMessage;
+    if (systemMessage) {
+      messageContent = `${systemMessage.content}\n\n---\n\n${lastUserMessage}`;
+    }
 
     const apiMessages = [{
       fid: messageId,
       parentId,
       childrenIds: [],
       role: "user",
-      content: lastUserMessage,
+      content: messageContent,
       user_action: "chat",
       files: [],
       timestamp,
       models: [model],
-      chat_type: "t2t",
+      chat_type: "agent",
       feature_config: {
         thinking_enabled: true,
         output_schema: "phase",
@@ -298,8 +305,8 @@ class QwenProvider extends BaseProvider {
         thinking_format: "summary",
         auto_search: true,
       },
-      extra: { meta: { subChatType: "t2t" } },
-      sub_chat_type: "t2t",
+      extra: { meta: { subChatType: "agent" } },
+      sub_chat_type: "agent",
       parent_id: parentId,
     }];
 
