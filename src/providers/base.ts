@@ -135,9 +135,13 @@ export abstract class BaseProvider {
       await page.setViewport({ width: 1280, height: 800 });
       await page.goto(this.info.loginUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
 
+      // Show the login URL for users to open in their browser
+      console.log(chalk.cyan(`\nOpen this URL in your browser to log in:\n`));
+      console.log(chalk.white(`  ${this.info.loginUrl}\n`));
+
       // Take screenshot of login page
       const screenshot = await page.screenshot({ encoding: "base64" });
-      console.log(chalk.yellow("\nScan the QR code below to log in:\n"));
+      console.log(chalk.yellow("Scan the QR code below to log in:\n"));
 
       // Enable VT mode on Windows for ANSI rendering
       if (process.platform === "win32") {

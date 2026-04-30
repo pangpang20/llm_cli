@@ -3,9 +3,12 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 
+// ASCII characters from dark to light
+const ASCII_CHARS = " .'`^\",:;Il!i><~+_-?][}{1)(|/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$";
+
 /**
- * Render a base64-encoded PNG image as ANSI art in the terminal.
- * Works on Linux, macOS, and Windows (cmd/PowerShell on Win10+).
+ * Render a base64-encoded PNG image as ASCII art in the terminal.
+ * Works on Linux, macOS, and Windows (cmd/PowerShell).
  * Also writes a temp PNG for fallback viewing.
  */
 export async function renderBase64Image(base64: string): Promise<string> {
@@ -16,43 +19,35 @@ export async function renderBase64Image(base64: string): Promise<string> {
   const tmpPath = path.join(os.tmpdir(), `llm_cli_qr_${Date.now()}.png`);
   fs.writeFileSync(tmpPath, buf);
 
-  // Determine target width
+  // Determine target width (chars are taller than wide, ratio ~0.6)
   const termWidth = process.stdout.columns || 80;
-  const targetWidth = Math.max(Math.min(termWidth - 2, 120), 30);
-  const scale = targetWidth / width;
-  const targetHeight = Math.max(Math.round(height * scale), 1);
+  const targetWidth = Math.max(Math.min(termWidth - 2, 120), 40);
+  const aspectRatio = 0.6; // char width / char height
+  const targetHeight = Math.max(Math.round(targetWidth / width * height * aspectRatio), 1);
 
   // Scale image
   const scaled = nearestNeighbor(pixels, width, height, targetWidth, targetHeight, 4);
 
-  // Render with half-block characters
+  // Convert to ASCII
   const lines: string[] = [];
-  const renderHeight = targetHeight + (targetHeight % 2);
-
-  for (let y = 0; y < renderHeight; y += 2) {
+  for (let y = 0; y < targetHeight; y++) {
     let line = "";
     for (let x = 0; x < targetWidth; x++) {
-      const topIdx = (y * targetWidth + x) * 4;
-      const botIdx = ((y + 1) * targetWidth + x) * 4;
-
-      const tr = clamp(scaled[topIdx]);
-      const tg = clamp(scaled[topIdx + 1]);
-      const tb = clamp(scaled[topIdx + 2]);
-
-      if (y + 1 < renderHeight) {
-        const br = clamp(scaled[botIdx]);
-        const bg = clamp(scaled[botIdx + 1]);
-        const bb = clamp(scaled[botIdx + 2]);
-        line += `\x1b[38;2;${tr};${tg};${tb}m\x1b[48;2;${br};${bg};${bb}m▀`;
-      } else {
-        line += `\x1b[38;2;${tr};${tg};${tb}m\x1b[49m▀`;
-      }
+      const idx = (y * targetWidth + x) * 4;
+      const r = clamp(scaled[idx]);
+      const g = clamp(scaled[idx + 1]);
+      const b = clamp(scaled[idx + 2]);
+      // Brightness (luminance)
+      const brightness = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+      // Map brightness to character
+      const charIdx = Math.floor((1 - brightness / 255) * (ASCII_CHARS.length - 1));
+      line += ASCII_CHARS[charIdx];
     }
-    lines.push(line + "\x1b[0m");
+    lines.push(line);
   }
 
-  console.log(lines.join("\n"));
-  console.log(`\n  If the image doesn't render above, open: ${tmpPath}\n`);
+  console.log("\n" + lines.join("\n") + "\n");
+  console.log(`  Or open this file in a browser/image viewer: ${tmpPath}\n`);
 
   return tmpPath;
 }
@@ -66,7 +61,6 @@ function parsePNG(buffer: Buffer): {
   height: number;
   pixels: Uint8Array;
 } {
-  // Validate signature
   const sig = [137, 80, 78, 71, 13, 10, 26, 10];
   for (let i = 0; i < 8; i++) {
     if (buffer[i] !== sig[i]) throw new Error("Invalid PNG signature");
@@ -101,11 +95,9 @@ function parsePNG(buffer: Buffer): {
   const idatData = Buffer.concat(idatChunks);
   const decompressed = zlib.inflateSync(idatData);
 
-  // PNG color type: 2=RGB(3ch), 6=RGBA(4ch)
   const channels = colorType === 6 ? 4 : colorType === 2 ? 3 : 0;
   if (!channels) throw new Error(`Unsupported PNG color type: ${colorType}`);
 
-  // Unfilter and convert to RGBA (4 channels)
   const raw = unfilter(decompressed, width, height, channels);
   const rgba = toRGBA(raw, width, height, channels);
 
@@ -124,25 +116,25 @@ function unfilter(data: Uint8Array, w: number, h: number, ch: number): Uint8Arra
     const prev = y > 0 ? out.subarray((y - 1) * w * ch) : new Uint8Array(w * ch);
 
     switch (filterType) {
-      case 0: // None
+      case 0:
         dest.set(src);
         break;
-      case 1: // Sub
+      case 1:
         for (let i = 0; i < src.length; i++) {
           dest[i] = (src[i] + (i >= ch ? dest[i - ch] : 0)) & 0xff;
         }
         break;
-      case 2: // Up
+      case 2:
         for (let i = 0; i < src.length; i++) {
           dest[i] = (src[i] + prev[i]) & 0xff;
         }
         break;
-      case 3: // Average
+      case 3:
         for (let i = 0; i < src.length; i++) {
           dest[i] = (src[i] + ((i >= ch ? dest[i - ch] : 0) + prev[i]) / 2 | 0) & 0xff;
         }
         break;
-      case 4: // Paeth
+      case 4:
         for (let i = 0; i < src.length; i++) {
           const a = i >= ch ? dest[i - ch] : 0;
           const b = prev[i];
@@ -164,8 +156,7 @@ function paeth(a: number, b: number, c: number): number {
 }
 
 function toRGBA(raw: Uint8Array, w: number, h: number, ch: number): Uint8Array {
-  if (ch === 4) return raw; // already RGBA
-  // RGB -> RGBA (opaque)
+  if (ch === 4) return raw;
   const out = new Uint8Array(w * h * 4);
   for (let i = 0, j = 0; i < w * h; i++, j += 3) {
     out[i * 4] = raw[j];
