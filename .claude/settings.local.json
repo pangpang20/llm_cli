@@ -5,7 +5,14 @@
       "Bash(git add *)",
       "Bash(git commit -m ' *)",
       "Bash(git remote *)",
-      "Bash(git check-ignore *)"
+      "Bash(git check-ignore *)",
+      "Bash(npx tsc *)",
+      "Bash(git branch *)",
+      "Bash(git push *)",
+      "WebFetch(domain:chat.qwen.ai)",
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "Bash(gh api *)"
     ]
   }
 }

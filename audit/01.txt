@@ -1,0 +1,99 @@
+# 代码审计报告 - 01
+
+## 项目: llm_cli
+
+## 安全问题
+
+### #1 [高危] 任意命令执行
+- 位置: src/tools/bash.ts:24
+- 问题: exec() 接受 LLM 返回的任何字符串命令，无沙箱、无白名单、无危险命令过滤。攻击者可通过 prompt injection 执行 rm -rf、curl | bash 等
+
+### #2 [高危] Shell 注入
+- 位置: src/tools/bash.ts:24
+- 问题: child_process.exec 使用 /bin/sh -c 解析，如果 LLM 构造 "; rm -rf /; " 会直接执行
+
+### #3 [高危] SSRF / 任意 URL 导航
+- 位置: src/tools/browser.ts:44
+- 问题: browser_navigate 接受任意 URL，LLM 可能被引导访问内网地址如 http://169.254.169.254
+
+### #4 [高危] 任意文件写入
+- 位置: src/tools/write.ts:23
+- 问题: 无路径限制，可覆盖 /etc/passwd、.env 等系统文件
+
+### #5 [中危] 浏览器截图任意文件写入
+- 位置: src/tools/browser.ts:80
+- 问题: 截屏保存路径无限制，可覆盖任意文件
+
+### #6 [中危] 路径遍历
+- 位置: src/tools/read.ts:20
+- 问题: path.resolve 后无目录穿越检查，可用 ../../../etc/passwd 读取系统文件
+
+## 代码规范 / 设计问题
+
+### #7 不安全的类型断言
+- 位置: src/chat.ts:29
+- 问题: as any 类型断言破坏了 ChatMessage 接口的类型安全。应扩展接口或使用联合类型
+
+### #8 不安全的类型断言
+- 位置: src/provider/dashscope.ts:47,62
+- 问题: messages as any 类型断言，ChatMessage 与实际 OpenAI 类型不完全兼容，应使用正确的 OpenAI 类型
+
+### #9 类型不一致
+- 位置: src/chat.ts:22
+- 问题: toolCalls 参数类型 ChatMessage["tool_calls"] 在接口定义中未包含 name 字段，类型不一致
+
+### #10 重复导出
+- 位置: src/tools/index.ts:26-27
+- 问题: 重复导出 Tool 和 ToolCall，同时从 browser 导出 cleanupBrowser，应该只导出必要的
+
+### #11 未使用的类型导出
+- 位置: src/tools/types.ts:2
+- 问题: ToolCall 接口在此文件中定义，但 index.ts 之外的文件未使用
+
+## 可靠性问题
+
+### #12 Promise 缺少错误处理
+- 位置: src/tools/bash.ts:24
+- 问题: Promise 缺少 .catch 处理，如果 exec 回调本身抛出（如 timeout 后），Promise 可能永远不会 resolve
+
+### #13 浏览器初始化无重试上限
+- 位置: src/tools/browser.ts:10
+- 问题: browser 初始化失败时下次调用仍会用 null 重试，无重试上限
+
+### #14 工具调用串行执行
+- 位置: src/index.ts:147
+- 问题: 并发工具调用是串行的 for...of，但 tool_calls 数组中的多个工具调用在 API 语义上本应可并行执行，性能差
+
+### #15 使用 any 类型捕获错误
+- 位置: src/index.ts:168
+- 问题: err: any — 使用 any 类型，应该用 unknown + 类型守卫
+
+### #16 错误码可能为 undefined
+- 位置: src/tools/bash.ts:29
+- 问题: error.code 是 number | undefined，在字符串模板中可能显示为 undefined 字符串
+
+## 项目配置问题
+
+### #17 依赖分类错误
+- 位置: package.json:26
+- 问题: @types/node 和 typescript 应放在 devDependencies，不是运行时依赖
+
+### #18 缺少发布配置
+- 位置: package.json
+- 问题: 无 .npmignore 或 files 字段，发布时会包含不必要的文件
+
+### #19 缺少脚本
+- 位置: package.json
+- 问题: 无测试脚本、无 lint 脚本
+
+### #20 浏览器沙箱被禁用
+- 位置: src/tools/browser.ts:13
+- 问题: --no-sandbox 在生产环境降低安全性，应通过环境变量控制
+
+## 建议优先修复
+
+1. bash 工具加固 — 改用 child_process.execFile 替代 exec，或添加命令白名单/黑名单
+2. 路径沙箱 — 所有文件操作限制在项目根目录内，禁止 .. 穿越
+3. 文件写入保护 — 禁止覆盖关键系统文件（.env、*.key、系统目录等）
+4. 浏览器 URL 限制 — 禁止访问 file://、localhost、内网 IP
+5. 修正类型断言 — 消除 as any

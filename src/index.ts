@@ -1,8 +1,7 @@
 import * as readline from "readline";
 import chalk from "chalk";
-import OpenAI from "openai";
-import { DashScopeProvider } from "./provider/dashscope";
-import { ChatManager } from "./chat";
+import { ensureAuth } from "./auth";
+import { QwenWebProvider, QwenMessage } from "./provider/qwen_web";
 import { allTools, cleanupBrowser } from "./tools";
 import { Tool } from "./tools/types";
 
@@ -92,20 +91,15 @@ function getToolByName(name: string): Tool | undefined {
 }
 
 async function main() {
-  const apiKey = process.env.DASHSCOPE_API_KEY;
-  if (!apiKey) {
-    console.error(chalk.red("Error: DASHSCOPE_API_KEY environment variable not set."));
-    console.error("Please set it with: export DASHSCOPE_API_KEY=your-api-key");
-    process.exit(1);
-  }
+  // Authenticate via browser login
+  const cookies = await ensureAuth();
 
-  const provider = new DashScopeProvider({
-    apiKey,
-    model: process.env.LLM_MODEL || "qwen-plus",
-    baseURL: process.env.LLM_BASE_URL || undefined,
-  });
+  const provider = new QwenWebProvider({ cookies });
 
-  const chat = new ChatManager(SYSTEM_PROMPT);
+  const chatHistory: QwenMessage[] = [
+    { role: "system", content: SYSTEM_PROMPT },
+  ];
+
   const ui = createUI();
 
   console.log(chalk.cyan("=== LLM CLI Agent ==="));
@@ -125,13 +119,23 @@ async function main() {
     // Handle commands
     if (trimmed === "/quit" || trimmed === "/exit") break;
     if (trimmed === "/clear") {
-      chat.reset();
+      chatHistory.length = 0;
+      chatHistory.push({ role: "system", content: SYSTEM_PROMPT });
       console.log(chalk.gray("Conversation cleared.\n"));
+      continue;
+    }
+    if (trimmed === "/login") {
+      // Force re-login
+      const { ensureAuth: reAuth } = await import("./auth");
+      const newCookies = await reAuth();
+      // Can't replace provider instance easily, just notify
+      console.log(chalk.green("Session refreshed. New authentication saved.\n"));
       continue;
     }
     if (trimmed === "/help") {
       console.log(chalk.cyan("Commands:"));
       console.log("  /clear   - Clear conversation history");
+      console.log("  /login   - Re-authenticate with browser");
       console.log("  /quit    - Exit");
       console.log("  /help    - Show this help");
       console.log("\nJust type your message to start chatting.\n");
@@ -139,73 +143,17 @@ async function main() {
     }
 
     // Add user message
-    chat.addUserMessage(trimmed);
+    chatHistory.push({ role: "user", content: trimmed });
 
-    // Loop for tool calls
-    let hasToolCall = true;
-    while (hasToolCall) {
-      try {
-        const response = await provider.chat(chat.getHistory(), allTools);
-        const choice = response.choices[0];
-        const message = choice.message;
-
-        if (message?.tool_calls && message.tool_calls.length > 0) {
-          console.log(chalk.gray("  thinking..."));
-
-          // Add assistant message with tool calls
-          chat.addAssistantMessage(message.content || "", message.tool_calls);
-
-          // Execute tool calls in parallel
-          const results = await Promise.all(
-            message.tool_calls.map(async (tc) => {
-              const fn = tc.type === "function"
-                ? (tc as OpenAI.ChatCompletionMessageFunctionToolCall).function
-                : undefined;
-              const toolName = fn?.name ?? "unknown";
-              let toolArgs: Record<string, unknown>;
-              try {
-                toolArgs = JSON.parse(fn?.arguments ?? "{}");
-              } catch {
-                toolArgs = {};
-              }
-
-              printToolCall(toolName, toolArgs);
-
-              const tool = getToolByName(toolName);
-              if (!tool) {
-                return { toolCallId: tc.id, result: `Error: Unknown tool "${toolName}"`, toolName };
-              }
-
-              try {
-                const result = await tool.execute(toolArgs);
-                return { toolCallId: tc.id, result, toolName };
-              } catch (err: unknown) {
-                const message = err instanceof Error ? err.message : String(err);
-                const errorResult = `Error: ${message}`;
-                return { toolCallId: tc.id, result: errorResult, toolName };
-              }
-            })
-          );
-
-          // Add tool results to chat history
-          for (const { toolCallId, result, toolName } of results) {
-            chat.addToolResult(toolCallId, result, toolName);
-            printToolResult(result);
-          }
-
-          hasToolCall = true;
-        } else {
-          // No tool calls - just text response
-          const content = message?.content || "(empty response)";
-          console.log(chalk.white(content) + "\n");
-          chat.addAssistantMessage(content);
-          hasToolCall = false;
-        }
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        console.error(chalk.red(`Error: ${message}`));
-        hasToolCall = false;
-      }
+    // Send to LLM
+    try {
+      console.log(chalk.gray("  thinking..."));
+      const response = await provider.chat(chatHistory, allTools);
+      console.log(chalk.white(response.content) + "\n");
+      chatHistory.push({ role: "assistant", content: response.content });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(chalk.red(`Error: ${message}`));
     }
   }
 

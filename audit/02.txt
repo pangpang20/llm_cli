@@ -1,0 +1,19 @@
+# 代码审计报告 - 02
+
+## 审查范围: src/index.ts 消息队列改动
+
+## 新问题
+
+### #21 [高危] EOF 未处理导致死锁
+- 位置: src/index.ts:79-86
+- 问题: 用户按 Ctrl+D 关闭 stdin 时，readline 触发 close 事件，但 AsyncQueue 没有收到终止信号。queue.pop() 会永远挂起，进程无法退出
+- 修复: 监听 rl 的 'close' 事件，在 AsyncQueue 中添加 done 标记和拒绝机制
+
+### #22 [中危] 缺少 error 事件监听
+- 位置: src/index.ts:81-85
+- 问题: readline.Interface 未监听 error 事件，如果 stdin 发生异常会 crash 进程
+- 修复: 添加 rl.on('error', ...) 处理
+
+### #23 [低危] 非空断言
+- 位置: src/index.ts:58
+- 问题: shift()! 使用了非空断言。虽然逻辑上有 length > 0 保护，但应使用更安全的写法

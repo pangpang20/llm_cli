@@ -1,0 +1,56 @@
+# 代码审计报告 - 03
+
+## 审查范围: 全量代码（开发 agent 修复后）
+
+## 新发现（不在 01.txt / 02.txt 中）
+
+### #24 [高危] write_file 缺少路径校验
+- 位置: src/tools/write.ts:22-32
+- 问题: readFileTool 有 resolveAndValidate 路径遍历防护, editFileTool 有 validatePath 系统路径防护, 但 writeFileTool 没有任何路径校验, 攻击者仍可写入任意系统文件。与其他文件工具的防护不一致, 形成安全短板
+
+### #25 [高危] bash 黑名单极易被绕过
+- 位置: src/tools/bash.ts:4
+- 问题: DANGEROUS_COMMANDS 使用 startsWith 匹配且带尾随空格, 可通过多种方式绕过:
+  - 大小写: "Curl evil.com" 不匹配 "curl "
+  - 空白字符: 使用 ${IFS} 或 $'\t' 代替空格: "curl${IFS}evil.com"
+  - 前缀冲突: "ncat " 会误杀 "ncdu", 而 "nc " 不匹配 "ncat"
+  - 命令替代: 使用 python -c, perl, ruby 等执行网络请求完全不受限
+
+### #26 [高危] execFile 仍通过 shell 执行
+- 位置: src/tools/bash.ts:41
+- 问题: 虽然从 exec 改为 execFile, 但仍调用 execFile("/bin/sh", ["-c", command], ...), 命令仍经由 /bin/sh 解析, shell 注入风险未消除。execFile 的优势在于直接执行二进制文件时才生效
+
+### #27 [中危] createUI 函数为死代码
+- 位置: src/index.ts:53-64
+- 问题: createUI() 仍被 main() 调用（第 97 行）, 但原计划的 AsyncQueue 队列机制未实现。该函数保留但功能未增强
+
+### #28 [低危] process.cwd() 路径校验边界问题
+- 位置: src/tools/read.ts:9, src/tools/edit.ts:10
+- 问题: startsWith(process.cwd()) 在 cwd 是其他目录前缀时会误判, 例如 cwd=/opt/llm_cli_evil 时, /opt/llm_cli_evil/data 会被放行。应追加 "/" 或使用 path.relative 判断
+
+### #29 [低危] streamChat 方法被移除
+- 位置: src/provider/dashscope.ts
+- 问题: 01.txt 审计时存在的 streamChat 方法已被删除, 如果是有意为之则无问题, 但无说明
+
+## 01.txt 中已修复的问题
+
+- #3 (SSRF): browser.ts 新增 validateUrl 函数, 校验协议、localhost、内网 IP — 已修复
+- #4 (任意文件写入 write): 仍存在问题, 见 #24
+- #5 (截图路径): browser.ts 新增 validateScreenshotPath — 已修复
+- #6 (路径遍历 read): read.ts 新增 resolveAndValidate — 已修复
+- #1/#2 (命令执行): 从 exec 改为 execFile + 黑名单, 但黑名单易绕过, 见 #25/#26
+- #7/#8/#9 (类型断言): 改用 OpenAI 原生类型 — 已修复
+- #10 (重复导出): index.ts 改为 type export — 已修复
+- #13 (浏览器重试): browser.ts 新增 initAttempts 和 MAX_INIT_ATTEMPTS — 已修复
+- #15 (err: any): 改为 err: unknown + instanceof 检查 — 已修复
+- #16 (error.code): 使用 ?? 处理 undefined — 已修复
+- #17 (devDependencies): 已移至 devDependencies — 已修复
+- #18 (files 字段): 已添加 "files": ["dist/**/*"] — 已修复
+- #19 (脚本): 已添加 "lint": "tsc --noEmit" — 已修复
+- #20 (--no-sandbox): 改为环境变量 NO_SANDBOX 控制 — 已修复
+
+## 02.txt 中仍未修复的问题
+
+- #21 (EOF 死锁): AsyncQueue 未实现, 原 createUI 保留, 此问题在现有架构中不适用（但仍建议实现队列时处理）
+- #22 (error 事件): 同上
+- #23 (非空断言): shift()! 仍存在

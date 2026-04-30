@@ -1,15 +1,15 @@
 # LLM CLI Agent
 
-一个类似 Claude Code 的命令行 AI 助手工具。在终端中与大语言模型对话，AI 可以自动调用工具完成文件读写、Shell 命令执行、浏览器操作等任务。
+一个类似 Claude Code 的命令行 AI 助手工具。通过浏览器登录 Qwen 账号即可在终端中与 AI 对话，AI 可以自动调用工具完成文件读写、Shell 命令执行、浏览器操作等任务。
 
 ## 功能特性
 
+- **浏览器登录** — 打开浏览器扫码登录，自动获取认证信息
 - **交互式 REPL** — 在终端中与 AI 自由对话
 - **文件操作** — 读取、创建、编辑文件
 - **Shell 命令** — 执行任意终端命令
 - **浏览器自动化** — 打开网页、截图、提取文本、点击、输入
 - **多轮工具链** — AI 可以连续调用多个工具完成复杂任务
-- **OpenAI 兼容接口** — 支持 DashScope（通义千问）及其他兼容 API
 
 ## 工具列表
 
@@ -41,21 +41,21 @@ npm run build
 
 ## 使用
 
-### 1. 配置 API Key
+### 1. 登录认证
 
-目前默认使用 [DashScope API](https://dashscope.console.aliyun.com/)（通义千问），需要在阿里云获取 API Key：
-
-```bash
-export DASHSCOPE_API_KEY=your-api-key-here
-```
-
-### 2. 启动
+首次运行无需配置 API Key，工具会自动打开浏览器让你登录：
 
 ```bash
 npm start
 ```
 
-进入交互界面后直接输入问题或指令即可：
+运行后会：
+1. 自动弹出浏览器窗口
+2. 打开 [chat.qwen.ai](https://chat.qwen.ai/)
+3. 你扫码或输入账号密码登录
+4. 登录成功后浏览器自动关闭，认证信息保存到本地
+
+### 2. 开始对话
 
 ```
 === LLM CLI Agent ===
@@ -72,26 +72,24 @@ AI 会自动调用 `write_file` 工具创建文件。
 |------|------|
 | `/help` | 显示帮助信息 |
 | `/clear` | 清空对话历史 |
+| `/login` | 重新打开浏览器登录 |
 | `/quit` 或 `/exit` | 退出程序 |
 
-### 4. 环境变量
+### 4. 会话管理
+
+认证信息保存在 `.qwen_session.json` 文件中，有效期为 12 小时。过期后会自动重新登录。
+
+```bash
+# 手动删除会话文件强制重新登录
+rm .qwen_session.json
+npm start
+```
+
+### 5. 环境变量
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
-| `DASHSCOPE_API_KEY` | 必需 | API 密钥 |
-| `LLM_MODEL` | `qwen-plus` | 使用的模型名称 |
-| `LLM_BASE_URL` | DashScope 默认地址 | 自定义 API 地址（OpenAI 兼容接口） |
-
-### 兼容其他 API
-
-如果你想使用其他兼容 OpenAI 接口的 API（如 OpenAI、本地 Ollama 等）：
-
-```bash
-export DASHSCOPE_API_KEY=your-key
-export LLM_BASE_URL=https://api.openai.com/v1
-export LLM_MODEL=gpt-4o
-npm start
-```
+| `NO_SANDBOX` | `0` | 设为 `1` 时禁用浏览器沙箱（Docker/CI 环境需要） |
 
 ## 开发
 
@@ -101,6 +99,9 @@ npm run dev
 
 # 手动编译
 npm run build
+
+# 类型检查
+npm run lint
 ```
 
 ## 项目结构
@@ -108,8 +109,11 @@ npm run build
 ```
 src/
   index.ts              - REPL 主循环入口
-  chat.ts               - 对话历史管理
-  provider/dashscope.ts - LLM API 封装（OpenAI SDK）
+  auth.ts               - 浏览器登录 & 会话管理
+  chat.ts               - 对话历史管理（已废弃，使用内联数组）
+  provider/
+    dashscope.ts        - DashScope API 封装（备用）
+    qwen_web.ts         - Qwen 网页版 API 封装
   tools/
     types.ts            - 工具接口定义
     read.ts             - 文件读取工具
