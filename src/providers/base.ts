@@ -52,7 +52,8 @@ export abstract class BaseProvider {
   }
 
   protected async launchBrowser(): Promise<Browser> {
-    const noSandbox = process.env.NO_SANDBOX === "1";
+    // Auto-enable no-sandbox when running as root (Chromium refuses to run as root without it)
+    const noSandbox = process.env.NO_SANDBOX === "1" || process.getuid?.() === 0;
     const hasDisplay = process.env.DISPLAY !== undefined;
 
     return puppeteer.launch({
