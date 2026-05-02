@@ -246,9 +246,24 @@ class DoubaoProvider extends BaseProvider {
 
     info(`[Doubao] Request body length: ${body.length}`);
 
+    // Build URL with required query parameters
+    const fp = this.cookieString.match(/s_v_web_id=([^;]+)/)?.[1] || "";
+    const msToken = this.cookieString.match(/msToken=([^;]+)/)?.[1] || "";
+    const deviceId = String(Math.floor(Math.random() * 9000000000000000000) + 1000000000000000000);
+    const params = new URLSearchParams({
+      aid: "1128",
+      device_id: deviceId,
+      device_platform: "web",
+      fp,
+      msToken,
+      a_bogus: "",
+    });
+    const apiUrl = `${this.info.apiUrl}?${params.toString()}`;
+    info(`[Doubao] API URL: ${apiUrl.slice(0, 150)}`);
+
     let content = "";
     try {
-      content = await this.sseFetch(this.info.apiUrl, body, abortSignal);
+      content = await this.sseFetch(apiUrl, body, abortSignal);
       info(`[Doubao] Chat response: ${content.length} chars`);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -313,7 +328,13 @@ class DoubaoProvider extends BaseProvider {
 
             try {
               const event = JSON.parse(jsonStr) as Record<string, unknown>;
-              info(`[Doubao SSE] Event data keys: ${Object.keys(event).join(", ")}`);
+
+              // Log STREAM_ERROR details
+              if (event.error_code !== undefined) {
+                error(`[Doubao SSE] STREAM_ERROR: code=${event.error_code}, msg=${event.error_msg}, extra=${JSON.stringify(event.extra)}`);
+              }
+
+              info(`[Doubao SSE] Event data: ${jsonStr.slice(0, 300)}`);
 
               // Try different response formats
               const choices = event.choices as Array<Record<string, unknown>> | undefined;
