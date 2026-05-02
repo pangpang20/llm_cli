@@ -459,6 +459,7 @@ class QwenProvider extends BaseProvider {
       info(`[Qwen] Chat response: ${content.length} chars`);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      if (message === "Request cancelled") throw err;
       error(`[Qwen] Chat error: ${message}`);
       throw new Error(
         `Qwen API failed: ${message}. ` +
