@@ -158,45 +158,42 @@ class DoubaoProvider extends BaseProvider {
       const authCookies = this.extractAuthCookies(allCookies);
       info(`[Doubao] Auth cookies found: ${authCookies.length}, names: ${authCookies.map(c => c.name).join(", ")}`);
 
-      // Now intercept API requests to capture the real chat endpoint
-      info("[Doubao] Setting up request interception for chat API");
-      console.log(chalk.cyan("\nLogin successful! Now please send a test message in the browser."));
-      console.log(chalk.gray("I'll capture the API request format automatically.\n"));
+      // Navigate to chat page and intercept the real API request
+      info("[Doubao] Navigating to chat page for API capture");
+      console.log(chalk.cyan("\nLogin successful! Navigating to chat page..."));
+      await page.goto("https://www.doubao.com/chat/", { waitUntil: "domcontentloaded", timeout: 30000 });
+      await new Promise((r) => setTimeout(r, 3000));
+
+      console.log(chalk.cyan("Please send a test message in the browser (e.g. 'hello')."));
+      console.log(chalk.gray("Waiting for you to send a message... (up to 5 minutes)\n"));
 
       let capturedApi: { url: string; headers: Record<string, string>; body: string } | null = null;
 
       await page.setRequestInterception(true);
       page.on("request", (req) => {
         const url = req.url();
-        if (url.includes("/chat/") || url.includes("/completion") || url.includes("/chat/completions")) {
+        const method = req.method();
+        const postData = req.postData() || "";
+        // Only capture POST requests to chat/completion endpoints with JSON body
+        if (method === "POST" && postData.length > 10 &&
+            (url.includes("chat/completion") || url.includes("chat/completions"))) {
           const headers = req.headers();
-          const postData = req.postData() || "";
           info(`[Doubao] CAPTURED API: ${url}`);
+          info(`[Doubao] CAPTURED method: ${method}`);
           info(`[Doubao] CAPTURED headers: ${JSON.stringify(headers)}`);
-          info(`[Doubao] CAPTURED body: ${postData.slice(0, 500)}`);
+          info(`[Doubao] CAPTURED body: ${postData.slice(0, 1000)}`);
           capturedApi = { url, headers: headers as Record<string, string>, body: postData };
         }
         req.continue();
       });
 
-      // Wait for user to send a message (poll for captured API)
-      const apiCapturePromise = new Promise<void>((resolve) => {
+      // Wait until API request is captured (up to 5 minutes)
+      await new Promise<void>((resolve) => {
         const check = setInterval(() => {
           if (capturedApi) { clearInterval(check); resolve(); }
         }, 500);
-        // Timeout after 2 minutes
-        setTimeout(() => { clearInterval(check); resolve(); }, 120000);
+        setTimeout(() => { clearInterval(check); resolve(); }, 300000);
       });
-
-      const rl2 = readline.createInterface({ input: process.stdin });
-      const inputPromise = new Promise<void>((resolve) => {
-        rl2.question(chalk.yellow("Press Enter after sending a message (or just press Enter to skip): "), () => {
-          rl2.close();
-          resolve();
-        });
-      });
-
-      await Promise.race([apiCapturePromise, inputPromise]);
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const capturedResult = capturedApi as any;
@@ -212,10 +209,11 @@ class DoubaoProvider extends BaseProvider {
         };
         fs.writeFileSync(this.getSessionFilePath(), JSON.stringify(sessionData, null, 2));
         info(`[Doubao] Saved API info: ${apiUrl}`);
-        console.log(chalk.green("API request captured and saved!\n"));
+        console.log(chalk.green("\nAPI request captured and saved! Closing browser...\n"));
       } else {
-        info(`[Doubao] No API request captured, saving cookies only`);
+        info(`[Doubao] No API request captured (timeout), saving cookies only`);
         this.saveSession(authCookies);
+        console.log(chalk.yellow("\nTimeout: no API request captured. Saving cookies only.\n"));
       }
 
       await browser.close();
