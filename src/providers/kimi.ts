@@ -1,24 +1,27 @@
 import * as https from "https";
+import * as crypto from "crypto";
 import { Cookie } from "puppeteer";
 import { BaseProvider, ChatMessage, ChatResponse, ProviderInfo } from "./base";
 import chalk from "chalk";
-import { info } from "../utils/logger";
+import { info, error } from "../utils/logger";
 
-const KIMI_API = "https://kimi.moonshot.cn/api/chat";
+const KIMI_CHAT = "https://www.kimi.com/apiv2/kimi.gateway.chat.v1.ChatService/Chat";
 
 class KimiProvider extends BaseProvider {
   readonly info: ProviderInfo = {
     id: "kimi",
     name: "Kimi (月之暗面)",
-    loginUrl: "https://kimi.moonshot.cn/",
+    loginUrl: "https://www.kimi.com/",
     sessionFile: ".kimi_session.json",
-    apiUrl: KIMI_API,
+    apiUrl: KIMI_CHAT,
   };
+
+  private chatSessionId: string | null = null;
 
   protected isLoginComplete(): string {
     return `() => {
       const url = window.location.href;
-      if (url === "https://kimi.moonshot.cn/" || url.startsWith("https://kimi.moonshot.cn/chat/")) {
+      if (url === "https://www.kimi.com/" || url.startsWith("https://www.kimi.com/chat/")) {
         const loginEl = document.querySelector('[class*="login"], [class*="Login"], [class*="auth"]');
         return !loginEl;
       }
@@ -28,12 +31,12 @@ class KimiProvider extends BaseProvider {
 
   protected extractAuthCookies(cookies: Cookie[]): Cookie[] {
     return cookies.filter(
-      (c) => c.name === "token" ||
-             c.name === "session_id" ||
-             c.name === "sid" ||
-             c.name.startsWith("auth_") ||
-             c.name === "refresh_token" ||
-             (c.domain.includes("moonshot") && (c.httpOnly || c.name.toLowerCase().includes("token")))
+      (c) => c.name === "kimi-auth" ||
+             c.name.startsWith("__snaker__") ||
+             c.name.startsWith("Hm_") ||
+             c.name === "HMACCOUNT" ||
+             c.name.includes("gdxidpyhxdE") ||
+             (c.domain.includes("kimi") && (c.httpOnly || c.name.toLowerCase().includes("auth")))
     );
   }
 
@@ -41,28 +44,10 @@ class KimiProvider extends BaseProvider {
     return {
       "Content-Type": "application/json",
       Cookie: this.cookieString,
-      Origin: "https://kimi.moonshot.cn",
-      Referer: "https://kimi.moonshot.cn/",
+      Origin: "https://www.kimi.com",
+      Referer: "https://www.kimi.com/",
       "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     };
-  }
-
-  private async apiFetch(url: string, body: string): Promise<Record<string, unknown>> {
-    return new Promise((resolve, reject) => {
-      const parsed = new URL(url);
-      const req = https.request(parsed, { method: "POST", headers: this.buildHeaders() }, (res) => {
-        let data = "";
-        res.on("data", (chunk) => (data += chunk));
-        res.on("end", () => {
-          try { resolve(JSON.parse(data)); } catch {
-            reject(new Error(`Failed to parse: ${data.slice(0, 500)}`));
-          }
-        });
-      });
-      req.on("error", reject);
-      req.write(body);
-      req.end();
-    });
   }
 
   override async login(): Promise<Cookie[]> {
@@ -133,13 +118,13 @@ class KimiProvider extends BaseProvider {
       console.log(chalk.green(`Opened ${this.info.loginUrl} in your browser.`));
       console.log(chalk.gray("Please complete login in the browser window.\n"));
 
-      const authCookieNames = ["token", "session_id", "sid", "refresh_token", "auth_"];
+      const authCookieNames = ["kimi-auth", "__snaker__id", "HMACCOUNT"];
       let done = false;
 
       const pollInterval = setInterval(async () => {
         if (done) return;
         const cookies = await page.cookies();
-        const hasAuthCookies = cookies.some((c) => authCookieNames.some(n => c.name.startsWith(n) || c.name === n));
+        const hasAuthCookies = cookies.some((c) => authCookieNames.includes(c.name));
         info(`[Kimi] Polling: ${cookies.length} cookies, auth found=${hasAuthCookies}`);
         if (hasAuthCookies) {
           clearInterval(pollInterval);
@@ -195,32 +180,114 @@ class KimiProvider extends BaseProvider {
     }
   }
 
-  async chat(messages: ChatMessage[], _signal?: AbortSignal): Promise<ChatResponse> {
-    const conversationText = messages
-      .filter((m) => m.role !== "system")
-      .map((m) => `${m.role}: ${m.content}`)
-      .join("\n\n");
+  async chat(messages: ChatMessage[], abortSignal?: AbortSignal): Promise<ChatResponse> {
+    if (!this.chatSessionId) {
+      this.chatSessionId = crypto.randomUUID();
+      info(`[Kimi] Created new chat session: ${this.chatSessionId}`);
+    }
 
-    const body = JSON.stringify({ prompt: conversationText, sessionId: this.sessionId });
+    const userMessages = messages.filter((m) => m.role !== "system");
+    const lastUserMessage = userMessages[userMessages.length - 1]?.content || "";
 
-    let response: Record<string, unknown>;
+    const body = JSON.stringify({
+      scenario: "SCENARIO_K2D5",
+      tools: [{ type: "TOOL_TYPE_SEARCH", search: {} }],
+      message: {
+        role: "user",
+        blocks: [{
+          message_id: "",
+          text: { content: lastUserMessage },
+        }],
+      },
+    });
+
+    let content = "";
     try {
-      response = await this.apiFetch(KIMI_API, body);
+      content = await this.sseFetch(KIMI_CHAT, body, abortSignal);
+      info(`[Kimi] Chat response: ${content.length} chars`);
     } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (message === "Request cancelled") throw err;
+      error(`[Kimi] Chat error: ${message}`);
       throw new Error(
-        `Kimi API failed: ${err instanceof Error ? err.message : String(err)}. ` +
+        `Kimi API failed: ${message}. ` +
         "Try removing .kimi_session.json and logging in again."
       );
     }
 
-    if (typeof response.sessionId === "string") this.sessionId = response.sessionId;
-
-    const content = typeof response.content === "string" ? response.content
-      : typeof response.message === "string" ? response.message
-      : typeof response.text === "string" ? response.text
-      : JSON.stringify(response);
-
     return { content };
+  }
+
+  private sseFetch(url: string, body: string, abortSignal?: AbortSignal): Promise<string> {
+    return new Promise((resolve, reject) => {
+      if (abortSignal?.aborted) {
+        return reject(new Error("Request cancelled"));
+      }
+
+      const parsed = new URL(url);
+      const req = https.request(parsed, {
+        method: "POST",
+        headers: this.buildHeaders(),
+        timeout: 120000,
+        signal: abortSignal,
+      }, (res) => {
+        if (res.statusCode !== 200) {
+          let errData = "";
+          res.on("data", (chunk) => (errData += chunk));
+          res.on("end", () => {
+            error(`[Kimi API] HTTP ${res.statusCode}: ${errData}`);
+            reject(new Error(`HTTP ${res.statusCode}: ${errData}`));
+          });
+          return;
+        }
+
+        let accumulated = "";
+        let buffer = "";
+
+        res.on("data", (chunk: Buffer) => {
+          buffer += chunk.toString();
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
+
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed || !trimmed.startsWith("data:")) continue;
+
+            const jsonStr = trimmed.slice(5).trim();
+            if (!jsonStr || jsonStr === "[DONE]") continue;
+
+            try {
+              const event = JSON.parse(jsonStr) as Record<string, unknown>;
+              const text = event.text as string | undefined;
+              if (text) accumulated += text;
+            } catch {
+              // Ignore parse errors
+            }
+          }
+        });
+
+        res.on("end", () => {
+          resolve(accumulated || "(empty response)");
+        });
+      });
+
+      req.on("error", (err) => {
+        if (err.name === "AbortError") {
+          reject(new Error("Request cancelled"));
+        } else {
+          reject(err);
+        }
+      });
+
+      if (abortSignal) {
+        abortSignal.addEventListener("abort", () => {
+          req.destroy(new Error("Request cancelled"));
+        });
+      }
+
+      req.write(body);
+      req.end();
+    });
   }
 }
 
