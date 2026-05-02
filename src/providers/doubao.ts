@@ -196,10 +196,13 @@ class DoubaoProvider extends BaseProvider {
       stream: true,
     });
 
+    info(`[Doubao] Chat request: ${DOUBAO_API}`);
+    info(`[Doubao] Request body: ${body.slice(0, 500)}`);
+
     let content = "";
     try {
       content = await this.sseFetch(DOUBAO_API, body, abortSignal);
-      info(`[Doubao] Chat response: ${content.length} chars`);
+      info(`[Doubao] Chat response: ${content.length} chars, content: ${content.slice(0, 200)}`);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       if (message === "Request cancelled") throw err;
@@ -226,6 +229,9 @@ class DoubaoProvider extends BaseProvider {
         timeout: 120000,
         signal: abortSignal,
       }, (res) => {
+        info(`[Doubao SSE] Response status: ${res.statusCode}`);
+        info(`[Doubao SSE] Response headers: ${JSON.stringify(res.headers)}`);
+
         if (res.statusCode !== 200) {
           let errData = "";
           res.on("data", (chunk) => (errData += chunk));
@@ -240,27 +246,46 @@ class DoubaoProvider extends BaseProvider {
         let buffer = "";
 
         res.on("data", (chunk: Buffer) => {
-          buffer += chunk.toString();
+          const chunkStr = chunk.toString();
+          info(`[Doubao SSE] Received chunk: ${chunkStr.slice(0, 300)}`);
+          buffer += chunkStr;
           const lines = buffer.split("\n");
           buffer = lines.pop() || "";
 
           for (const line of lines) {
             const trimmed = line.trim();
-            if (!trimmed || !trimmed.startsWith("data:")) continue;
+            if (!trimmed) continue;
+
+            info(`[Doubao SSE] Processing line: ${trimmed.slice(0, 200)}`);
+
+            if (!trimmed.startsWith("data:")) continue;
 
             const jsonStr = trimmed.slice(5).trim();
             if (!jsonStr || jsonStr === "[DONE]") continue;
 
             try {
               const event = JSON.parse(jsonStr) as Record<string, unknown>;
+              info(`[Doubao SSE] Parsed event: ${JSON.stringify(event).slice(0, 300)}`);
+
+              // Try different response formats
               const choices = event.choices as Array<Record<string, unknown>> | undefined;
               if (choices && choices.length > 0) {
                 const delta = choices[0].delta as Record<string, unknown> | undefined;
                 const content = delta?.content as string | undefined;
-                if (content) accumulated += content;
+                if (content) {
+                  accumulated += content;
+                  info(`[Doubao SSE] Accumulated content: ${accumulated.length} chars`);
+                }
               }
-            } catch {
-              // Ignore parse errors
+
+              // Also try direct text field
+              const text = event.text as string | undefined;
+              if (text) {
+                accumulated += text;
+                info(`[Doubao SSE] Accumulated text: ${accumulated.length} chars`);
+              }
+            } catch (e) {
+              info(`[Doubao SSE] Parse error: ${e instanceof Error ? e.message : String(e)}`);
             }
           }
         });
