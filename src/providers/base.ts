@@ -135,7 +135,7 @@ export abstract class BaseProvider {
       const page = await browser.newPage();
       info(`[${this.info.name}] Browser launched`);
 
-      await page.setViewport({ width: 1280, height: 800 });
+      await page.setViewport({ width: 1664, height: 800 });
       info(`[${this.info.name}] Navigating to ${this.info.loginUrl}`);
       await page.goto(this.info.loginUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
 
@@ -188,7 +188,7 @@ export abstract class BaseProvider {
 
     try {
       const page = await browser.newPage();
-      await page.setViewport({ width: 1280, height: 800 });
+      await page.setViewport({ width: 1664, height: 800 });
       info(`[${this.info.name}] Navigating to ${this.info.loginUrl}`);
       await page.goto(this.info.loginUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
 

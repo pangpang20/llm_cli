@@ -150,7 +150,7 @@ class QwenProvider extends BaseProvider {
       });
 
       info(`[Qwen] Navigating to ${this.info.loginUrl}`);
-      await page.setViewport({ width: 1280, height: 800 });
+      await page.setViewport({ width: 1664, height: 800 });
       await page.goto(this.info.loginUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
 
       info("[Qwen] Page loaded, waiting for user login");
