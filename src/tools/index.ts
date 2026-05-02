@@ -9,6 +9,9 @@ import {
   browserTextTool,
   browserClickTool,
   browserTypeTool,
+  browserAssertTool,
+  browserWaitTool,
+  browserEvalTool,
   cleanupBrowser,
 } from "./browser";
 
@@ -22,6 +25,9 @@ export const allTools: Tool[] = [
   browserTextTool,
   browserClickTool,
   browserTypeTool,
+  browserAssertTool,
+  browserWaitTool,
+  browserEvalTool,
 ];
 
 export {
@@ -34,6 +40,9 @@ export {
   browserTextTool,
   browserClickTool,
   browserTypeTool,
+  browserAssertTool,
+  browserWaitTool,
+  browserEvalTool,
   cleanupBrowser,
 };
 

@@ -13,6 +13,7 @@ import {
   readFileTool, writeFileTool, editFileTool, bashTool,
   browserNavigateTool, browserScreenshotTool, browserTextTool,
   browserClickTool, browserTypeTool,
+  browserAssertTool, browserWaitTool, browserEvalTool,
 } from "./tools";
 
 function buildSystemPrompt(harness: Harness, basePrompt: string): string {
@@ -40,6 +41,9 @@ const TOOL_REGISTRY: Record<string, { execute: (args: Record<string, unknown>) =
   browser_text: browserTextTool,
   browser_click: browserClickTool,
   browser_type: browserTypeTool,
+  browser_assert: browserAssertTool,
+  browser_wait: browserWaitTool,
+  browser_eval: browserEvalTool,
 };
 
 function parseToolCall(text: string): { name: string; args: Record<string, unknown> } | null {

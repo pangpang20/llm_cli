@@ -220,6 +220,184 @@ export const browserTypeTool: Tool = {
   },
 };
 
+export const browserAssertTool: Tool = {
+  name: "browser_assert",
+  description: "Assert a condition on the current page. Returns PASS or FAIL.",
+  parameters: {
+    type: "object",
+    properties: {
+      type: {
+        type: "string",
+        description: "Assertion type: element_exists, element_not_exists, text_contains, text_equals, url_contains, url_equals, value_contains, value_equals",
+      },
+      selector: {
+        type: "string",
+        description: "CSS selector (required for element/text/value assertions)",
+      },
+      attribute: {
+        type: "string",
+        description: "Attribute name (required for value_contains/value_equals)",
+      },
+      expected: {
+        type: "string",
+        description: "Expected value to compare against",
+      },
+    },
+    required: ["type"],
+  },
+  async execute(args: Record<string, unknown>): Promise<string> {
+    const p = await getPage();
+    const type = String(args.type);
+    const selector = args.selector ? String(args.selector) : "";
+    const attribute = args.attribute ? String(args.attribute) : "";
+    const expected = args.expected ? String(args.expected) : "";
+
+    try {
+      switch (type) {
+        case "element_exists": {
+          const el = await p.$(selector);
+          return el ? "PASS: Element exists" : `FAIL: Element not found: ${selector}`;
+        }
+        case "element_not_exists": {
+          const el = await p.$(selector);
+          return el ? `FAIL: Element found: ${selector}` : "PASS: Element not exists";
+        }
+        case "text_contains": {
+          const text = await p.$eval(selector, (el) => el.textContent || "").catch(() => "");
+          return text.includes(expected) ? `PASS: Text contains "${expected}"` : `FAIL: Text "${text}" does not contain "${expected}"`;
+        }
+        case "text_equals": {
+          const text = await p.$eval(selector, (el) => (el.textContent || "").trim()).catch(() => "");
+          return text === expected ? `PASS: Text equals "${expected}"` : `FAIL: Text "${text}" does not equal "${expected}"`;
+        }
+        case "url_contains": {
+          const url = p.url();
+          return url.includes(expected) ? `PASS: URL contains "${expected}"` : `FAIL: URL "${url}" does not contain "${expected}"`;
+        }
+        case "url_equals": {
+          const url = p.url();
+          return url === expected ? `PASS: URL equals "${expected}"` : `FAIL: URL "${url}" does not equal "${expected}"`;
+        }
+        case "value_contains": {
+          const val = await p.$eval(selector, (el, attr) => (el as HTMLElement).getAttribute(attr) || "", attribute).catch(() => "");
+          return val.includes(expected) ? `PASS: ${attribute} contains "${expected}"` : `FAIL: ${attribute}="${val}" does not contain "${expected}"`;
+        }
+        case "value_equals": {
+          const val = await p.$eval(selector, (el, attr) => (el as HTMLElement).getAttribute(attr) || "", attribute).catch(() => "");
+          return val === expected ? `PASS: ${attribute} equals "${expected}"` : `FAIL: ${attribute}="${val}" does not equal "${expected}"`;
+        }
+        default:
+          return `Error: Unknown assertion type: ${type}`;
+      }
+    } catch (err) {
+      return `FAIL: ${err instanceof Error ? err.message : String(err)}`;
+    }
+  },
+};
+
+export const browserWaitTool: Tool = {
+  name: "browser_wait",
+  description: "Wait for a condition on the page before continuing.",
+  parameters: {
+    type: "object",
+    properties: {
+      type: {
+        type: "string",
+        description: "Wait type: element_visible, element_hidden, text_visible, url_contains",
+      },
+      selector: {
+        type: "string",
+        description: "CSS selector (required for element_visible/element_hidden/text_visible)",
+      },
+      expected: {
+        type: "string",
+        description: "Expected text or URL fragment (required for text_visible/url_contains)",
+      },
+      timeout: {
+        type: "number",
+        description: "Timeout in milliseconds (default: 10000)",
+      },
+    },
+    required: ["type"],
+  },
+  async execute(args: Record<string, unknown>): Promise<string> {
+    const p = await getPage();
+    const type = String(args.type);
+    const selector = args.selector ? String(args.selector) : "";
+    const expected = args.expected ? String(args.expected) : "";
+    const timeout = Number(args.timeout) || 10000;
+
+    try {
+      switch (type) {
+        case "element_visible": {
+          await p.waitForSelector(selector, { visible: true, timeout });
+          return `PASS: Element visible: ${selector}`;
+        }
+        case "element_hidden": {
+          await p.waitForSelector(selector, { hidden: true, timeout });
+          return `PASS: Element hidden: ${selector}`;
+        }
+        case "text_visible": {
+          await p.waitForFunction(
+            (sel, txt) => {
+              const el = document.querySelector(sel);
+              return el ? (el.textContent || "").includes(txt) : false;
+            },
+            { timeout },
+            selector,
+            expected
+          );
+          return `PASS: Text "${expected}" visible in ${selector}`;
+        }
+        case "url_contains": {
+          await p.waitForFunction(
+            (txt) => window.location.href.includes(txt),
+            { timeout },
+            expected
+          );
+          return `PASS: URL contains "${expected}"`;
+        }
+        default:
+          return `Error: Unknown wait type: ${type}`;
+      }
+    } catch {
+      return `FAIL: Timeout waiting for ${type} (${timeout}ms)`;
+    }
+  },
+};
+
+export const browserEvalTool: Tool = {
+  name: "browser_eval",
+  description: "Execute JavaScript in the page context and return the result.",
+  parameters: {
+    type: "object",
+    properties: {
+      expression: {
+        type: "string",
+        description: "JavaScript expression to evaluate in the page context",
+      },
+    },
+    required: ["expression"],
+  },
+  async execute(args: Record<string, unknown>): Promise<string> {
+    const p = await getPage();
+    const expression = String(args.expression);
+    try {
+      const result = await p.evaluate((expr) => {
+        try {
+          const val = eval(expr);
+          return typeof val === "object" ? JSON.stringify(val) : String(val);
+        } catch (e) {
+          return `Error: ${e instanceof Error ? e.message : String(e)}`;
+        }
+      }, expression);
+      return `Result: ${result}`;
+    } catch (err) {
+      return `Error: ${err instanceof Error ? err.message : String(err)}`;
+    }
+  },
+};
+
 export async function cleanupBrowser() {
   if (browser) {
     await browser.close();
