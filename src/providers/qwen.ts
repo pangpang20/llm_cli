@@ -592,13 +592,17 @@ class QwenProvider extends BaseProvider {
         });
 
         res.on("error", (err) => {
-          error(`[Qwen SSE] Stream error: ${err.message}`);
+          if (err.name !== "AbortError") {
+            error(`[Qwen SSE] Stream error: ${err.message}`);
+          }
           reject(err);
         });
       });
 
       req.on("error", (err) => {
-        error(`[Qwen API] Request error: ${err.message}`);
+        if (err.name !== "AbortError") {
+          error(`[Qwen API] Request error: ${err.message}`);
+        }
         reject(err);
       });
 
