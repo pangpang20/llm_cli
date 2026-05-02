@@ -220,6 +220,9 @@ class DoubaoProvider extends BaseProvider {
           botId,
         };
         fs.writeFileSync(this.getSessionFilePath(), JSON.stringify(sessionData, null, 2));
+        this.capturedApiUrl = apiUrl;
+        this.capturedApiHeaders = apiHeaders;
+        this.capturedBotId = botId;
         info(`[Doubao] Saved API info: ${apiUrl}`);
         console.log(chalk.green("\nAPI request captured and saved! Closing browser...\n"));
       } else {
