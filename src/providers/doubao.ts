@@ -154,7 +154,10 @@ class DoubaoProvider extends BaseProvider {
         this.saveSession(authCookies);
         info(`[Doubao] Login successful! Session saved`);
         console.log(chalk.green("Login successful!\n"));
-        // Keep browser open for chat
+        // Close browser after login
+        await this.browser.close();
+        this.browser = null;
+        this.page = null;
         return authCookies;
       } else {
         await this.browser.close();
