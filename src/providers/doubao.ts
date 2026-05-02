@@ -4,7 +4,7 @@ import { BaseProvider, ChatMessage, ChatResponse, ProviderInfo } from "./base";
 import chalk from "chalk";
 import { info, error } from "../utils/logger";
 
-const DOUBAO_API = "https://www.doubao.com/chat/completion";
+const DOUBAO_API = "https://www.doubao.com/api/chat/completion";
 
 class DoubaoProvider extends BaseProvider {
   readonly info: ProviderInfo = {
@@ -191,9 +191,14 @@ class DoubaoProvider extends BaseProvider {
     const userMessages = messages.filter((m) => m.role !== "system");
     const lastUserMessage = userMessages[userMessages.length - 1]?.content || "";
 
+    // Try different request formats
     const body = JSON.stringify({
+      conversation_id: this.sessionId || "",
       messages: [{ role: "user", content: lastUserMessage }],
+      model: "doubao-chat",
       stream: true,
+      temperature: 0.7,
+      max_tokens: 2048,
     });
 
     info(`[Doubao] Chat request: ${DOUBAO_API}`);
