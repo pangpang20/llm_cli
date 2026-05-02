@@ -293,13 +293,35 @@ async function main() {
 
   console.log(chalk.cyan(`=== LLM CLI Agent (${provider.info.name}) ===`));
   console.log(chalk.gray("Author: chenyunliang <676814828@qq.com>"));
-  console.log(chalk.gray("Type /help for commands. Ctrl+C to exit. Press Esc to cancel response.\n"));
+  console.log(chalk.gray("Type /help for commands. Ctrl+C to exit. Press Esc to cancel response. Double-Esc to quit.\n"));
+
+  // Double-ESC detection for idle exit
+  let isResponding = false;
+  let lastEscTime = 0;
+  const DOUBLE_ESC_MS = 500;
+
+  const quitPromise = new Promise<void>((resolve) => {
+    const listener = (_str: string, key: { name: string }) => {
+      if (key.name !== "escape") return;
+      const now = Date.now();
+      if (!isResponding && now - lastEscTime < DOUBLE_ESC_MS) {
+        process.stdin.off("keypress", listener);
+        resolve();
+      }
+      lastEscTime = now;
+    };
+    process.stdin.on("keypress", listener);
+  });
 
   while (true) {
     let input: string;
     try {
-      input = await ui.prompt(chalk.green("> "));
-    } catch {
+      input = await Promise.race([
+        ui.prompt(chalk.green("> ")),
+        quitPromise.then(() => { throw new Error("QUIT"); }),
+      ]);
+    } catch (err) {
+      if (err instanceof Error && err.message === "QUIT") break;
       break;
     }
 
@@ -481,6 +503,7 @@ async function main() {
     chatHistory.push({ role: "user", content: expandedInput });
 
     let maxToolRounds = 10;
+    isResponding = true;
     let abortController: AbortController | null = null;
 
     // Persistent ESC key listener — always active, only acts when controller is set
@@ -530,6 +553,7 @@ async function main() {
         break;
       }
     }
+    isResponding = false;
 
     if (maxToolRounds === 0) {
       console.log(chalk.yellow("  Tool call limit reached. Stopping.\n"));
