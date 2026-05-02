@@ -2,9 +2,9 @@ import * as https from "https";
 import { Cookie } from "puppeteer";
 import { BaseProvider, ChatMessage, ChatResponse, ProviderInfo } from "./base";
 import chalk from "chalk";
-import { info } from "../utils/logger";
+import { info, error } from "../utils/logger";
 
-const DOUBAO_API = "https://www.doubao.com/api/chat/v2";
+const DOUBAO_API = "https://www.doubao.com/chat/completion";
 
 class DoubaoProvider extends BaseProvider {
   readonly info: ProviderInfo = {
@@ -28,12 +28,15 @@ class DoubaoProvider extends BaseProvider {
 
   protected extractAuthCookies(cookies: Cookie[]): Cookie[] {
     return cookies.filter(
-      (c) => c.name === "token" ||
-             c.name === "session_id" ||
-             c.name === "sid" ||
+      (c) => c.name === "sessionid" ||
+             c.name === "sid_tt" ||
+             c.name === "passport_csrf_token" ||
+             c.name === "passport_csrf_token_default" ||
+             c.name === "uid_tt" ||
+             c.name === "sid_guard" ||
+             c.name === "ttwid" ||
              c.name.startsWith("passport_") ||
-             c.name === "refresh_token" ||
-             (c.domain.includes("doubao") && (c.httpOnly || c.name.toLowerCase().includes("token")))
+             (c.domain.includes("doubao") || c.domain.includes("byte") || c.domain.includes("tiktok"))
     );
   }
 
@@ -168,83 +171,121 @@ class DoubaoProvider extends BaseProvider {
   }
 
   private buildHeaders(): Record<string, string> {
+    // Extract CSRF token from cookies
+    const csrfMatch = this.cookieString.match(/passport_csrf_token=([^;]+)/);
+    const csrfToken = csrfMatch ? csrfMatch[1] : "";
+
     return {
       "Content-Type": "application/json",
       Cookie: this.cookieString,
       Origin: "https://www.doubao.com",
       Referer: "https://www.doubao.com/",
       "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      "X-CSRFToken": csrfToken,
+      "x-csrftoken": csrfToken,
     };
   }
 
-  private async apiFetch(url: string, body: string): Promise<Record<string, unknown>> {
-    return new Promise((resolve, reject) => {
-      const parsed = new URL(url);
-      const req = https.request(parsed, { method: "POST", headers: this.buildHeaders() }, (res) => {
-        let data = "";
-        res.on("data", (chunk) => (data += chunk));
-        res.on("end", () => {
-          console.log(chalk.gray(`  [Doubao API] Status: ${res.statusCode}`));
-          console.log(chalk.gray(`  [Doubao API] Response length: ${data.length}`));
-          if (data.length === 0) {
-            console.log(chalk.red(`  [Doubao API] Empty response`));
-            reject(new Error("Empty response from API"));
-            return;
-          }
-          console.log(chalk.gray(`  [Doubao API] Response: ${data.slice(0, 500)}`));
-          try {
-            resolve(JSON.parse(data));
-          } catch (e) {
-            console.log(chalk.red(`  [Doubao API] Failed to parse JSON`));
-            reject(new Error(`Failed to parse: ${data.slice(0, 500)}`));
-          }
-        });
-      });
-      req.on("error", (err) => {
-        console.log(chalk.red(`  [Doubao API] Request error: ${err.message}`));
-        reject(err);
-      });
-      console.log(chalk.gray(`  [Doubao API] POST ${url}`));
-      console.log(chalk.gray(`  [Doubao API] Body: ${body.slice(0, 200)}`));
-      console.log(chalk.gray(`  [Doubao API] Cookies: ${this.cookieString.slice(0, 100)}...`));
-      req.write(body);
-      req.end();
+  async chat(messages: ChatMessage[], abortSignal?: AbortSignal): Promise<ChatResponse> {
+    const userMessages = messages.filter((m) => m.role !== "system");
+    const lastUserMessage = userMessages[userMessages.length - 1]?.content || "";
+
+    const body = JSON.stringify({
+      messages: [{ role: "user", content: lastUserMessage }],
+      stream: true,
     });
-  }
 
-  async chat(messages: ChatMessage[], _signal?: AbortSignal): Promise<ChatResponse> {
-    const conversationText = messages
-      .filter((m) => m.role !== "system")
-      .map((m) => `${m.role}: ${m.content}`)
-      .join("\n\n");
-
-    const body = JSON.stringify({ prompt: conversationText, sessionId: this.sessionId });
-
-    let response: Record<string, unknown>;
+    let content = "";
     try {
-      response = await this.apiFetch(DOUBAO_API, body);
-      console.log(chalk.gray(`  [Doubao API] Parsed response: ${JSON.stringify(response).slice(0, 500)}`));
+      content = await this.sseFetch(DOUBAO_API, body, abortSignal);
+      info(`[Doubao] Chat response: ${content.length} chars`);
     } catch (err) {
-      console.log(chalk.red(`  [Doubao API] Error: ${err instanceof Error ? err.message : String(err)}`));
-      console.log(chalk.red(`  [Doubao API] Session file: ${this.getSessionFilePath()}`));
+      const message = err instanceof Error ? err.message : String(err);
+      if (message === "Request cancelled") throw err;
+      error(`[Doubao] Chat error: ${message}`);
       throw new Error(
-        `Doubao API failed: ${err instanceof Error ? err.message : String(err)}. ` +
+        `Doubao API failed: ${message}. ` +
         "Try removing .doubao_session.json and logging in again."
       );
     }
 
-    if (typeof response.sessionId === "string") this.sessionId = response.sessionId;
-
-    const content = typeof response.content === "string" ? response.content
-      : typeof response.message === "string" ? response.message
-      : typeof response.text === "string" ? response.text
-      : typeof response.data === "object" && response.data !== null
-        ? typeof (response.data as Record<string, unknown>).content === "string"
-          ? (response.data as Record<string, unknown>).content as string
-          : JSON.stringify(response)
-      : JSON.stringify(response);
-
     return { content };
+  }
+
+  private sseFetch(url: string, body: string, abortSignal?: AbortSignal): Promise<string> {
+    return new Promise((resolve, reject) => {
+      if (abortSignal?.aborted) {
+        return reject(new Error("Request cancelled"));
+      }
+
+      const parsed = new URL(url);
+      const req = https.request(parsed, {
+        method: "POST",
+        headers: this.buildHeaders(),
+        timeout: 120000,
+        signal: abortSignal,
+      }, (res) => {
+        if (res.statusCode !== 200) {
+          let errData = "";
+          res.on("data", (chunk) => (errData += chunk));
+          res.on("end", () => {
+            error(`[Doubao API] HTTP ${res.statusCode}: ${errData}`);
+            reject(new Error(`HTTP ${res.statusCode}: ${errData}`));
+          });
+          return;
+        }
+
+        let accumulated = "";
+        let buffer = "";
+
+        res.on("data", (chunk: Buffer) => {
+          buffer += chunk.toString();
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
+
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed || !trimmed.startsWith("data:")) continue;
+
+            const jsonStr = trimmed.slice(5).trim();
+            if (!jsonStr || jsonStr === "[DONE]") continue;
+
+            try {
+              const event = JSON.parse(jsonStr) as Record<string, unknown>;
+              const choices = event.choices as Array<Record<string, unknown>> | undefined;
+              if (choices && choices.length > 0) {
+                const delta = choices[0].delta as Record<string, unknown> | undefined;
+                const content = delta?.content as string | undefined;
+                if (content) accumulated += content;
+              }
+            } catch {
+              // Ignore parse errors
+            }
+          }
+        });
+
+        res.on("end", () => {
+          resolve(accumulated || "(empty response)");
+        });
+      });
+
+      req.on("error", (err) => {
+        if (err.name === "AbortError") {
+          reject(new Error("Request cancelled"));
+        } else {
+          reject(err);
+        }
+      });
+
+      if (abortSignal) {
+        abortSignal.addEventListener("abort", () => {
+          req.destroy(new Error("Request cancelled"));
+        });
+      }
+
+      req.write(body);
+      req.end();
+    });
   }
 }
 
