@@ -249,6 +249,8 @@ class DoubaoProvider extends BaseProvider {
     // Build URL with required query parameters
     const fp = this.cookieString.match(/s_v_web_id=([^;]+)/)?.[1] || "";
     const msToken = this.cookieString.match(/msToken=([^;]+)/)?.[1] || "";
+    info(`[Doubao] Cookie names: ${this.cookieString.split(";").map(c => c.trim().split("=")[0]).join(", ")}`);
+    info(`[Doubao] fp=${fp.slice(0, 30)}, msToken=${msToken.slice(0, 30)}`);
     const deviceId = String(Math.floor(Math.random() * 9000000000000000000) + 1000000000000000000);
     const params = new URLSearchParams({
       aid: "1128",
@@ -292,6 +294,7 @@ class DoubaoProvider extends BaseProvider {
         signal: abortSignal,
       }, (res) => {
         info(`[Doubao SSE] Response status: ${res.statusCode}`);
+        info(`[Doubao SSE] Response headers: ${JSON.stringify(res.headers)}`);
 
         if (res.statusCode !== 200) {
           let errData = "";
@@ -305,9 +308,13 @@ class DoubaoProvider extends BaseProvider {
 
         let accumulated = "";
         let buffer = "";
+        let rawChunks: string[] = [];
 
         res.on("data", (chunk: Buffer) => {
-          buffer += chunk.toString();
+          const raw = chunk.toString();
+          rawChunks.push(raw);
+          info(`[Doubao SSE] Raw chunk (${raw.length} bytes): ${raw.slice(0, 500)}`);
+          buffer += raw;
           const lines = buffer.split("\n");
           buffer = lines.pop() || "";
 
@@ -359,7 +366,11 @@ class DoubaoProvider extends BaseProvider {
         });
 
         res.on("end", () => {
-          info(`[Doubao SSE] Stream ended, accumulated: ${accumulated.length} chars`);
+          const totalRaw = rawChunks.join("");
+          info(`[Doubao SSE] Stream ended, raw total: ${totalRaw.length} bytes, accumulated: ${accumulated.length} chars`);
+          if (totalRaw.length > 0 && accumulated.length === 0) {
+            info(`[Doubao SSE] Raw content (first 1000): ${totalRaw.slice(0, 1000)}`);
+          }
           resolve(accumulated || "(empty response)");
         });
       });
