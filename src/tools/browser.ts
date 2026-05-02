@@ -124,9 +124,14 @@ export const browserScreenshotTool: Tool = {
 
     let buffer: Uint8Array;
     if (args.selector) {
-      const el = await p.$(String(args.selector));
-      if (!el) return `Error: Element not found: ${args.selector}`;
-      buffer = await el.screenshot();
+      try {
+        const el = await p.$(String(args.selector));
+        if (!el) return `Error: Element not found: ${args.selector}`;
+        buffer = await el.screenshot();
+      } catch {
+        // Element not visible or not an HTMLElement, fallback to full page
+        buffer = await p.screenshot();
+      }
     } else {
       buffer = await p.screenshot();
     }
