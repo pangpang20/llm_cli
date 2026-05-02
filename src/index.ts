@@ -520,7 +520,7 @@ async function main() {
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
         // Don't show error for user cancellation
-        if (message === "Request cancelled" || message.includes("aborted")) {
+        if (message.includes("Request cancelled") || message.includes("aborted")) {
           abortController = null;
           break;
         }
