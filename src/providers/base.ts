@@ -5,6 +5,7 @@ import * as readline from "readline";
 import * as os from "os";
 import chalk from "chalk";
 import { info } from "../utils/logger";
+import { findChromePath } from "../utils/chrome";
 
 export interface ChatMessage {
   role: "system" | "user" | "assistant";
@@ -83,8 +84,10 @@ export abstract class BaseProvider {
     const noSandbox = process.env.NO_SANDBOX === "1" || process.getuid?.() === 0;
     const hasDisplay = process.env.DISPLAY !== undefined;
 
+    const executablePath = findChromePath();
     return puppeteer.launch({
       headless: !hasDisplay,
+      executablePath,
       args: noSandbox
         ? ["--no-sandbox", "--disable-setuid-sandbox"]
         : [],

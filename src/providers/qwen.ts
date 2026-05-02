@@ -90,8 +90,11 @@ class QwenProvider extends BaseProvider {
 
     const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "qwen-login-"));
 
+    const { findChromePath } = await import("../utils/chrome");
+    const executablePath = findChromePath();
     const browser = await puppeteer.launch({
       headless: false,
+      executablePath,
       userDataDir,
       args: [
         "--no-sandbox",

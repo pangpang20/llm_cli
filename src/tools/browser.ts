@@ -3,6 +3,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { Tool } from "./types";
+import { findChromePath } from "../utils/chrome";
 
 const PROJECT_ROOT = process.cwd();
 const ALLOWED_PROTOCOLS = ["http:", "https:"];
@@ -50,8 +51,10 @@ async function getBrowser(): Promise<Browser> {
     }
     initAttempts++;
     const noSandbox = process.env.NO_SANDBOX === "1" || process.getuid?.() === 0;
+    const executablePath = findChromePath();
     browser = await puppeteer.launch({
       headless: true,
+      executablePath,
       args: noSandbox
         ? ["--no-sandbox", "--disable-setuid-sandbox"]
         : [],
