@@ -108,13 +108,14 @@ class DoubaoProvider extends BaseProvider {
       console.log(chalk.green(`Opened ${this.info.loginUrl} in your browser.`));
       console.log(chalk.gray("Please complete login in the browser window.\n"));
 
-      const authCookieNames = ["token", "session_id", "sid", "refresh_token", "passport_"];
+      // Only detect cookies that exist AFTER login (not CSRF tokens which exist before login)
+      const authCookieNames = ["sessionid", "sid_tt", "uid_tt"];
       let done = false;
 
       const pollInterval = setInterval(async () => {
         if (done) return;
         const cookies = await page.cookies();
-        const hasAuthCookies = cookies.some((c) => authCookieNames.some(n => c.name.startsWith(n) || c.name === n));
+        const hasAuthCookies = cookies.some((c) => authCookieNames.includes(c.name));
         info(`[Doubao] Polling: ${cookies.length} cookies, auth found=${hasAuthCookies}`);
         if (hasAuthCookies) {
           clearInterval(pollInterval);
