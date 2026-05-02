@@ -16,6 +16,7 @@ class DoubaoProvider extends BaseProvider {
 
   private capturedApiUrl: string | null = null;
   private capturedApiHeaders: Record<string, string> | null = null;
+  private capturedBotId: string = "";
 
   protected isLoginComplete(): string {
     return `() => {
@@ -51,7 +52,9 @@ class DoubaoProvider extends BaseProvider {
         if (sessionData.apiUrl) {
           this.capturedApiUrl = sessionData.apiUrl;
           this.capturedApiHeaders = sessionData.apiHeaders || null;
+          this.capturedBotId = sessionData.botId || "";
           info(`[Doubao] Loaded captured API: ${sessionData.apiUrl}`);
+          if (this.capturedBotId) info(`[Doubao] Loaded bot_id: ${this.capturedBotId}`);
         }
       } catch {}
 
@@ -201,11 +204,20 @@ class DoubaoProvider extends BaseProvider {
         info(`[Doubao] Successfully captured API request!`);
         const apiUrl: string = capturedResult.url;
         const apiHeaders: Record<string, string> = capturedResult.headers;
+        const apiBody: string = capturedResult.body;
+        // Extract bot_id from captured body
+        let botId = "";
+        try {
+          const bodyObj = JSON.parse(apiBody);
+          botId = bodyObj?.client_meta?.bot_id || "";
+          info(`[Doubao] Extracted bot_id: ${botId}`);
+        } catch {}
         const sessionData = {
           cookies: authCookies,
           savedAt: new Date().toISOString(),
           apiUrl,
           apiHeaders,
+          botId,
         };
         fs.writeFileSync(this.getSessionFilePath(), JSON.stringify(sessionData, null, 2));
         info(`[Doubao] Saved API info: ${apiUrl}`);
@@ -256,7 +268,7 @@ class DoubaoProvider extends BaseProvider {
       client_meta: {
         local_conversation_id: `local_${Date.now()}`,
         conversation_id: "",
-        bot_id: "",
+        bot_id: this.capturedBotId,
         last_section_id: "",
         last_message_index: null,
       },
@@ -321,9 +333,13 @@ class DoubaoProvider extends BaseProvider {
     let headers: Record<string, string>;
 
     if (this.capturedApiUrl) {
-      // Use captured API URL and headers from login interception
+      // Use captured API URL and headers, but update the cookie
       apiUrl = this.capturedApiUrl;
-      headers = this.capturedApiHeaders || this.buildHeaders();
+      if (this.capturedApiHeaders) {
+        headers = { ...this.capturedApiHeaders, cookie: this.cookieString };
+      } else {
+        headers = this.buildHeaders();
+      }
       info(`[Doubao] Using captured API: ${apiUrl.slice(0, 150)}`);
     } else {
       // Fallback: build URL with query parameters
