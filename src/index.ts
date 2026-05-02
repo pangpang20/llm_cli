@@ -14,6 +14,7 @@ import {
   browserNavigateTool, browserScreenshotTool, browserTextTool,
   browserClickTool, browserTypeTool,
   browserAssertTool, browserWaitTool, browserEvalTool,
+  gitStatusTool, gitDiffTool, gitCommitTool, gitPushTool,
 } from "./tools";
 
 function buildSystemPrompt(harness: Harness, basePrompt: string): string {
@@ -44,6 +45,10 @@ const TOOL_REGISTRY: Record<string, { execute: (args: Record<string, unknown>) =
   browser_assert: browserAssertTool,
   browser_wait: browserWaitTool,
   browser_eval: browserEvalTool,
+  git_status: gitStatusTool,
+  git_diff: gitDiffTool,
+  git_commit: gitCommitTool,
+  git_push: gitPushTool,
 };
 
 function parseToolCall(text: string): { name: string; args: Record<string, unknown> } | null {

@@ -14,6 +14,12 @@ import {
   browserEvalTool,
   cleanupBrowser,
 } from "./browser";
+import {
+  gitStatusTool,
+  gitDiffTool,
+  gitCommitTool,
+  gitPushTool,
+} from "./git";
 
 export const allTools: Tool[] = [
   readFileTool,
@@ -28,6 +34,10 @@ export const allTools: Tool[] = [
   browserAssertTool,
   browserWaitTool,
   browserEvalTool,
+  gitStatusTool,
+  gitDiffTool,
+  gitCommitTool,
+  gitPushTool,
 ];
 
 export {
@@ -43,6 +53,10 @@ export {
   browserAssertTool,
   browserWaitTool,
   browserEvalTool,
+  gitStatusTool,
+  gitDiffTool,
+  gitCommitTool,
+  gitPushTool,
   cleanupBrowser,
 };
 
