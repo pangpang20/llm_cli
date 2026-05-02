@@ -1,4 +1,5 @@
 import * as https from "https";
+import * as fs from "fs";
 import { Cookie } from "puppeteer";
 import { BaseProvider, ChatMessage, ChatResponse, ProviderInfo } from "./base";
 import chalk from "chalk";
@@ -12,6 +13,9 @@ class DoubaoProvider extends BaseProvider {
     sessionFile: ".doubao_session.json",
     apiUrl: "https://www.doubao.com/chat/completion",
   };
+
+  private capturedApiUrl: string | null = null;
+  private capturedApiHeaders: Record<string, string> | null = null;
 
   protected isLoginComplete(): string {
     return `() => {
@@ -40,6 +44,17 @@ class DoubaoProvider extends BaseProvider {
     if (existing && existing.length > 0) {
       info(`[Doubao] Using cached session, ${existing.length} cookies`);
       this.cookieString = existing.map((c) => `${c.name}=${c.value}`).join("; ");
+
+      // Try to load captured API info from session file
+      try {
+        const sessionData = JSON.parse(fs.readFileSync(this.getSessionFilePath(), "utf-8"));
+        if (sessionData.apiUrl) {
+          this.capturedApiUrl = sessionData.apiUrl;
+          this.capturedApiHeaders = sessionData.apiHeaders || null;
+          info(`[Doubao] Loaded captured API: ${sessionData.apiUrl}`);
+        }
+      } catch {}
+
       console.log(chalk.gray(`Using cached session for ${this.info.name}...`));
       return existing;
     }
@@ -143,12 +158,70 @@ class DoubaoProvider extends BaseProvider {
       const authCookies = this.extractAuthCookies(allCookies);
       info(`[Doubao] Auth cookies found: ${authCookies.length}, names: ${authCookies.map(c => c.name).join(", ")}`);
 
+      // Now intercept API requests to capture the real chat endpoint
+      info("[Doubao] Setting up request interception for chat API");
+      console.log(chalk.cyan("\nLogin successful! Now please send a test message in the browser."));
+      console.log(chalk.gray("I'll capture the API request format automatically.\n"));
+
+      let capturedApi: { url: string; headers: Record<string, string>; body: string } | null = null;
+
+      await page.setRequestInterception(true);
+      page.on("request", (req) => {
+        const url = req.url();
+        if (url.includes("/chat/") || url.includes("/completion") || url.includes("/chat/completions")) {
+          const headers = req.headers();
+          const postData = req.postData() || "";
+          info(`[Doubao] CAPTURED API: ${url}`);
+          info(`[Doubao] CAPTURED headers: ${JSON.stringify(headers)}`);
+          info(`[Doubao] CAPTURED body: ${postData.slice(0, 500)}`);
+          capturedApi = { url, headers: headers as Record<string, string>, body: postData };
+        }
+        req.continue();
+      });
+
+      // Wait for user to send a message (poll for captured API)
+      const apiCapturePromise = new Promise<void>((resolve) => {
+        const check = setInterval(() => {
+          if (capturedApi) { clearInterval(check); resolve(); }
+        }, 500);
+        // Timeout after 2 minutes
+        setTimeout(() => { clearInterval(check); resolve(); }, 120000);
+      });
+
+      const rl2 = readline.createInterface({ input: process.stdin });
+      const inputPromise = new Promise<void>((resolve) => {
+        rl2.question(chalk.yellow("Press Enter after sending a message (or just press Enter to skip): "), () => {
+          rl2.close();
+          resolve();
+        });
+      });
+
+      await Promise.race([apiCapturePromise, inputPromise]);
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const capturedResult = capturedApi as any;
+      if (capturedResult) {
+        info(`[Doubao] Successfully captured API request!`);
+        const apiUrl: string = capturedResult.url;
+        const apiHeaders: Record<string, string> = capturedResult.headers;
+        const sessionData = {
+          cookies: authCookies,
+          savedAt: new Date().toISOString(),
+          apiUrl,
+          apiHeaders,
+        };
+        fs.writeFileSync(this.getSessionFilePath(), JSON.stringify(sessionData, null, 2));
+        info(`[Doubao] Saved API info: ${apiUrl}`);
+        console.log(chalk.green("API request captured and saved!\n"));
+      } else {
+        info(`[Doubao] No API request captured, saving cookies only`);
+        this.saveSession(authCookies);
+      }
+
       await browser.close();
 
       if (authCookies.length > 0) {
-        this.saveSession(authCookies);
-        info(`[Doubao] Login successful! Session saved`);
-        console.log(chalk.green("Login successful!\n"));
+        if (!capturedResult) this.saveSession(authCookies);
         return authCookies;
       } else {
         throw new Error("Login completed but no auth cookies were found. Please try again.");
@@ -246,26 +319,35 @@ class DoubaoProvider extends BaseProvider {
 
     info(`[Doubao] Request body length: ${body.length}`);
 
-    // Build URL with required query parameters
-    const fp = this.cookieString.match(/s_v_web_id=([^;]+)/)?.[1] || "";
-    const msToken = this.cookieString.match(/msToken=([^;]+)/)?.[1] || "";
-    info(`[Doubao] Cookie names: ${this.cookieString.split(";").map(c => c.trim().split("=")[0]).join(", ")}`);
-    info(`[Doubao] fp=${fp.slice(0, 30)}, msToken=${msToken.slice(0, 30)}`);
-    const deviceId = String(Math.floor(Math.random() * 9000000000000000000) + 1000000000000000000);
-    const params = new URLSearchParams({
-      aid: "1128",
-      device_id: deviceId,
-      device_platform: "web",
-      fp,
-      msToken,
-      a_bogus: "",
-    });
-    const apiUrl = `${this.info.apiUrl}?${params.toString()}`;
-    info(`[Doubao] API URL: ${apiUrl.slice(0, 150)}`);
+    let apiUrl: string;
+    let headers: Record<string, string>;
+
+    if (this.capturedApiUrl) {
+      // Use captured API URL and headers from login interception
+      apiUrl = this.capturedApiUrl;
+      headers = this.capturedApiHeaders || this.buildHeaders();
+      info(`[Doubao] Using captured API: ${apiUrl.slice(0, 150)}`);
+    } else {
+      // Fallback: build URL with query parameters
+      const fp = this.cookieString.match(/s_v_web_id=([^;]+)/)?.[1] || "";
+      const msToken = this.cookieString.match(/msToken=([^;]+)/)?.[1] || "";
+      const deviceId = String(Math.floor(Math.random() * 9000000000000000000) + 1000000000000000000);
+      const params = new URLSearchParams({
+        aid: "1128",
+        device_id: deviceId,
+        device_platform: "web",
+        fp,
+        msToken,
+        a_bogus: "",
+      });
+      apiUrl = `${this.info.apiUrl}?${params.toString()}`;
+      headers = this.buildHeaders();
+      info(`[Doubao] Using fallback API: ${apiUrl.slice(0, 150)}`);
+    }
 
     let content = "";
     try {
-      content = await this.sseFetch(apiUrl, body, abortSignal);
+      content = await this.sseFetch(apiUrl, body, abortSignal, headers);
       info(`[Doubao] Chat response: ${content.length} chars`);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -280,7 +362,7 @@ class DoubaoProvider extends BaseProvider {
     return { content };
   }
 
-  private sseFetch(url: string, body: string, abortSignal?: AbortSignal): Promise<string> {
+  private sseFetch(url: string, body: string, abortSignal?: AbortSignal, headers?: Record<string, string>): Promise<string> {
     return new Promise((resolve, reject) => {
       if (abortSignal?.aborted) {
         return reject(new Error("Request cancelled"));
@@ -289,7 +371,7 @@ class DoubaoProvider extends BaseProvider {
       const parsed = new URL(url);
       const req = https.request(parsed, {
         method: "POST",
-        headers: this.buildHeaders(),
+        headers: headers || this.buildHeaders(),
         timeout: 120000,
         signal: abortSignal,
       }, (res) => {
