@@ -8,8 +8,32 @@ import { debug, info, error } from "../utils/logger";
 const QWEN_API = "https://chat.qwen.ai/api/v2/chat/completions";
 const QWEN_NEW_CHAT = "https://chat.qwen.ai/api/v2/chats/new";
 
-const QWEN_TOOL_INSTRUCTION = `可用工具: bash, read_file, write_file, edit_file, browser_navigate, browser_screenshot, browser_text, browser_click, browser_type
-格式: [TOOL_CALL:工具名(参数)]`;
+const QWEN_TOOL_INSTRUCTION = `你拥有以下本地工具，必须严格按格式调用：
+
+工具列表：
+1. bash — 运行shell命令。参数: command（必填）, timeout（可选）
+2. read_file — 读取文件内容。参数: file_path（必填）
+3. write_file — 写入文件。参数: file_path（必填）, content（必填）
+4. edit_file — 编辑文件。参数: file_path（必填）, old_string（必填）, new_string（必填）
+5. browser_navigate — 访问网页。参数: url（必填）
+6. browser_screenshot — 截图。参数: path（可选）
+7. browser_text — 提取网页文字。参数: selector（可选）
+8. browser_click — 点击元素。参数: selector（必填）
+9. browser_type — 输入文字。参数: selector（必填）, text（必填）
+
+调用格式（必须严格遵守，不要使用其他格式）:
+[TOOL_CALL:工具名(参数名="参数值")]
+
+正确示例:
+[TOOL_CALL:read_file(file_path="src/index.ts")]
+[TOOL_CALL:bash(command="ls -la")]
+[TOOL_CALL:edit_file(file_path="src/app.ts", old_string="hello", new_string="world")]
+
+注意：
+- 工具名必须是上面列表中的英文名，不能用中文
+- 参数名必须完整拼写，如 file_path 不能写成 path
+- 每次只能调用一个工具
+- 必须包含所有必填参数`;
 
 class QwenProvider extends BaseProvider {
   readonly info: ProviderInfo = {
@@ -278,18 +302,27 @@ class QwenProvider extends BaseProvider {
     const introMessage = `请确认你了解以下可用的本地工具。当用户需要执行文件操作、运行命令或浏览器操作时，你必须使用以下工具：
 
 工具列表（工具名必须是精确匹配的英文）:
-1. bash — 运行shell命令。参数: command, timeout
-2. read_file — 读取文件。参数: file_path
-3. write_file — 写入文件。参数: file_path, content
-4. edit_file — 编辑文件。参数: file_path, old_string, new_string
-5. browser_navigate — 访问网页。参数: url
-6. browser_screenshot — 截图。参数: path
-7. browser_text — 提取网页文字。参数: selector
-8. browser_click — 点击。参数: selector
-9. browser_type — 输入文字。参数: selector, text
+1. bash — 运行shell命令。参数: command（必填）, timeout（可选）
+2. read_file — 读取文件。参数: file_path（必填）
+3. write_file — 写入文件。参数: file_path（必填）, content（必填）
+4. edit_file — 编辑文件。参数: file_path（必填）, old_string（必填）, new_string（必填）
+5. browser_navigate — 访问网页。参数: url（必填）
+6. browser_screenshot — 截图。参数: path（可选）
+7. browser_text — 提取网页文字。参数: selector（可选）
+8. browser_click — 点击。参数: selector（必填）
+9. browser_type — 输入文字。参数: selector（必填）, text（必填）
 
-调用格式: [TOOL_CALL:工具名(参数)]
-示例: [TOOL_CALL:bash(command="ls", timeout=30000)]
+调用格式（必须严格遵守）: [TOOL_CALL:工具名(参数名="参数值")]
+示例:
+[TOOL_CALL:read_file(file_path="src/index.ts")]
+[TOOL_CALL:bash(command="ls -la")]
+[TOOL_CALL:edit_file(file_path="src/app.ts", old_string="hello", new_string="world")]
+
+注意：
+- 工具名必须是上面列表中的英文名，不能用中文
+- 参数名必须完整拼写，如 file_path 不能写成 path
+- 每次只能调用一个工具
+- 必须包含所有必填参数
 
 请回复"了解"并列出你能使用的工具名称。`;
 
