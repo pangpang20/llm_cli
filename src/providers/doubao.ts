@@ -1,8 +1,8 @@
-import { Browser, Page, Cookie } from "puppeteer";
+import * as https from "https";
+import { Cookie } from "puppeteer";
 import { BaseProvider, ChatMessage, ChatResponse, ProviderInfo } from "./base";
 import chalk from "chalk";
 import { info, error } from "../utils/logger";
-import { findChromePath } from "../utils/chrome";
 
 class DoubaoProvider extends BaseProvider {
   readonly info: ProviderInfo = {
@@ -12,9 +12,6 @@ class DoubaoProvider extends BaseProvider {
     sessionFile: ".doubao_session.json",
     apiUrl: "https://www.doubao.com/chat/completion",
   };
-
-  private browser: Browser | null = null;
-  private page: Page | null = null;
 
   protected isLoginComplete(): string {
     return `() => {
@@ -33,6 +30,7 @@ class DoubaoProvider extends BaseProvider {
              c.name === "sid_tt" ||
              c.name === "uid_tt" ||
              c.name === "ttwid" ||
+             c.name === "passport_csrf_token" ||
              (c.domain.includes("doubao") || c.domain.includes("byte"))
     );
   }
@@ -76,29 +74,26 @@ class DoubaoProvider extends BaseProvider {
 
     const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "doubao-login-"));
 
+    const { findChromePath } = await import("../utils/chrome");
     const executablePath = findChromePath();
-    this.browser = await puppeteer.launch({
+    const browser = await puppeteer.launch({
       headless: false,
       executablePath,
       userDataDir,
-      args: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-blink-features=AutomationControlled",
-      ],
+      args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-blink-features=AutomationControlled"],
     });
 
     try {
-      this.page = await this.browser.newPage();
+      const page = await browser.newPage();
       info("[Doubao] Browser launched, new page created");
 
-      await this.page.evaluateOnNewDocument(() => {
+      await page.evaluateOnNewDocument(() => {
         Object.defineProperty(navigator, "webdriver", { get: () => false });
       });
 
       info(`[Doubao] Navigating to ${this.info.loginUrl}`);
-      await this.page.setViewport({ width: 1664, height: 800 });
-      await this.page.goto(this.info.loginUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
+      await page.setViewport({ width: 1664, height: 800 });
+      await page.goto(this.info.loginUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
 
       info("[Doubao] Page loaded, waiting for user login");
       console.log(chalk.green(`Opened ${this.info.loginUrl} in your browser.`));
@@ -108,15 +103,15 @@ class DoubaoProvider extends BaseProvider {
       let done = false;
 
       const pollInterval = setInterval(async () => {
-        if (done || !this.page) return;
-        const cookies = await this.page.cookies();
+        if (done) return;
+        const cookies = await page.cookies();
         const hasAuthCookies = cookies.some((c) => authCookieNames.includes(c.name));
         info(`[Doubao] Polling: ${cookies.length} cookies, auth found=${hasAuthCookies}`);
         if (hasAuthCookies) {
           clearInterval(pollInterval);
           done = true;
           info("[Doubao] Login detected via auth cookies! Refreshing page");
-          await this.page.reload({ waitUntil: "domcontentloaded" }).catch(() => {});
+          await page.reload({ waitUntil: "domcontentloaded" }).catch(() => {});
           await new Promise((r) => setTimeout(r, 2000));
         }
       }, 2000);
@@ -143,74 +138,41 @@ class DoubaoProvider extends BaseProvider {
 
       await Promise.race([doneCheck, timeoutPromise]);
 
-      if (!this.page) throw new Error("Browser page not available");
-
-      const allCookies = await this.page.cookies();
+      const allCookies = await page.cookies();
       info(`[Doubao] Total cookies found: ${allCookies.length}`);
       const authCookies = this.extractAuthCookies(allCookies);
       info(`[Doubao] Auth cookies found: ${authCookies.length}, names: ${authCookies.map(c => c.name).join(", ")}`);
+
+      await browser.close();
 
       if (authCookies.length > 0) {
         this.saveSession(authCookies);
         info(`[Doubao] Login successful! Session saved`);
         console.log(chalk.green("Login successful!\n"));
-        // Close browser after login
-        await this.browser.close();
-        this.browser = null;
-        this.page = null;
         return authCookies;
       } else {
-        await this.browser.close();
-        this.browser = null;
-        this.page = null;
         throw new Error("Login completed but no auth cookies were found. Please try again.");
       }
     } catch (err) {
       info(`[Doubao] Login error: ${err instanceof Error ? err.message : String(err)}`);
-      if (this.browser) {
-        try { await this.browser.close(); } catch {}
-        this.browser = null;
-        this.page = null;
-      }
+      try { await browser.close(); } catch {}
       throw new Error(`Login failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
-  private async ensureBrowser(): Promise<Page> {
-    if (this.page && this.browser?.isConnected()) {
-      return this.page;
-    }
+  private buildHeaders(): Record<string, string> {
+    const csrfMatch = this.cookieString.match(/passport_csrf_token=([^;]+)/);
+    const csrfToken = csrfMatch ? csrfMatch[1] : "";
 
-    // Reopen browser with saved cookies
-    const puppeteer = await import("puppeteer");
-    const os = await import("os");
-    const path = await import("path");
-    const fs = await import("fs");
-
-    const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "doubao-chat-"));
-    const executablePath = findChromePath();
-
-    this.browser = await puppeteer.launch({
-      headless: false,
-      executablePath,
-      userDataDir,
-      args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-blink-features=AutomationControlled"],
-    });
-
-    this.page = await this.browser.newPage();
-    await this.page.setViewport({ width: 1664, height: 800 });
-
-    // Set cookies
-    const session = this.loadSession();
-    if (session && session.length > 0) {
-      await this.page.setCookie(...session);
-    }
-
-    // Navigate to chat page
-    await this.page.goto("https://www.doubao.com/", { waitUntil: "domcontentloaded", timeout: 60000 });
-    await new Promise((r) => setTimeout(r, 2000));
-
-    return this.page;
+    return {
+      "Content-Type": "application/json",
+      Cookie: this.cookieString,
+      Origin: "https://www.doubao.com",
+      Referer: "https://www.doubao.com/",
+      "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      "X-CSRFToken": csrfToken,
+      "x-csrftoken": csrfToken,
+    };
   }
 
   async chat(messages: ChatMessage[], abortSignal?: AbortSignal): Promise<ChatResponse> {
@@ -219,78 +181,185 @@ class DoubaoProvider extends BaseProvider {
 
     info(`[Doubao] Chat: ${lastUserMessage.slice(0, 100)}`);
 
+    const body = JSON.stringify({
+      client_meta: {
+        local_conversation_id: `local_${Date.now()}`,
+        conversation_id: "",
+        bot_id: "",
+        last_section_id: "",
+        last_message_index: null,
+      },
+      messages: [{
+        local_message_id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        content_block: [{
+          block_type: 10000,
+          content: {
+            text_block: { text: lastUserMessage, icon_url: "", icon_url_dark: "", summary: "" },
+            pc_event_block: "",
+          },
+          block_id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+          parent_id: "",
+          meta_info: [],
+          append_fields: [],
+        }],
+        message_status: 0,
+      }],
+      option: {
+        send_message_scene: "",
+        create_time_ms: Date.now(),
+        collect_id: "",
+        is_audio: false,
+        answer_with_suggest: false,
+        tts_switch: false,
+        need_deep_think: 0,
+        click_clear_context: false,
+        from_suggest: false,
+        is_regen: false,
+        is_replace: false,
+        disable_sse_cache: false,
+        select_text_action: "",
+        resend_for_regen: false,
+        scene_type: 0,
+        unique_key: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        start_seq: 0,
+        need_create_conversation: true,
+        conversation_init_option: { need_ack_conversation: true },
+        regen_query_id: [],
+        edit_query_id: [],
+        regen_instruction: "",
+        no_replace_for_regen: false,
+        message_from: 0,
+        shared_app_name: "",
+        shared_app_id: "",
+        sse_recv_event_options: { support_chunk_delta: true },
+        is_ai_playground: false,
+        recovery_option: { is_recovery: false, req_create_time_sec: Math.floor(Date.now() / 1000), append_sse_event_scene: 0 },
+      },
+      ext: {
+        use_deep_think: "0",
+        fp: this.cookieString.match(/s_v_web_id=([^;]+)/)?.[1] || "",
+        conversation_init_option: '{"need_ack_conversation":true}',
+        commerce_credit_config_enable: "0",
+        sub_conv_firstmet_type: "1",
+      },
+    });
+
+    info(`[Doubao] Request body length: ${body.length}`);
+
+    let content = "";
     try {
-      const page = await this.ensureBrowser();
-
-      // Find the input box and type the message
-      const inputSelector = 'textarea, [contenteditable="true"], [class*="input"], [class*="editor"]';
-      await page.waitForSelector(inputSelector, { timeout: 10000 });
-
-      // Clear existing text and type new message
-      const input = await page.$(inputSelector);
-      if (!input) throw new Error("Cannot find input box");
-
-      await input.click({ clickCount: 3 });
-      await input.type(lastUserMessage, { delay: 10 });
-
-      // Find and click send button
-      const sendSelector = 'button[class*="send"], button[class*="submit"], [class*="send-btn"], [class*="submit-btn"]';
-      await page.waitForSelector(sendSelector, { timeout: 5000 });
-      const sendBtn = await page.$(sendSelector);
-      if (sendBtn) {
-        await sendBtn.click();
-      } else {
-        // Try pressing Enter
-        await page.keyboard.press("Enter");
-      }
-
-      // Wait for response to appear
-      info("[Doubao] Waiting for response...");
-      await new Promise((r) => setTimeout(r, 3000));
-
-      // Wait for response to complete (no new text for 2 seconds)
-      let lastText = "";
-      let stableCount = 0;
-      const maxWait = 60000;
-      const startTime = Date.now();
-
-      while (Date.now() - startTime < maxWait) {
-        const currentText = await page.evaluate(() => {
-          const msgs = document.querySelectorAll('[class*="message"], [class*="answer"], [class*="response"]');
-          const lastMsg = msgs[msgs.length - 1];
-          return lastMsg?.textContent || "";
-        });
-
-        if (currentText === lastText) {
-          stableCount++;
-          if (stableCount >= 4) break; // 2 seconds stable
-        } else {
-          stableCount = 0;
-          lastText = currentText;
-        }
-
-        if (abortSignal?.aborted) {
-          throw new Error("Request cancelled");
-        }
-
-        await new Promise((r) => setTimeout(r, 500));
-      }
-
-      // Extract the response
-      const response = await page.evaluate(() => {
-        const msgs = document.querySelectorAll('[class*="message"], [class*="answer"], [class*="response"]');
-        const lastMsg = msgs[msgs.length - 1];
-        return lastMsg?.textContent || "(empty response)";
-      });
-
-      info(`[Doubao] Response: ${response.length} chars`);
-      return { content: response };
+      content = await this.sseFetch(this.info.apiUrl, body, abortSignal);
+      info(`[Doubao] Chat response: ${content.length} chars`);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       if (message === "Request cancelled") throw err;
       error(`[Doubao] Chat error: ${message}`);
-      throw new Error(`Doubao chat failed: ${message}`);
+      throw new Error(
+        `Doubao API failed: ${message}. ` +
+        "Try removing .doubao_session.json and logging in again."
+      );
     }
+
+    return { content };
+  }
+
+  private sseFetch(url: string, body: string, abortSignal?: AbortSignal): Promise<string> {
+    return new Promise((resolve, reject) => {
+      if (abortSignal?.aborted) {
+        return reject(new Error("Request cancelled"));
+      }
+
+      const parsed = new URL(url);
+      const req = https.request(parsed, {
+        method: "POST",
+        headers: this.buildHeaders(),
+        timeout: 120000,
+        signal: abortSignal,
+      }, (res) => {
+        info(`[Doubao SSE] Response status: ${res.statusCode}`);
+
+        if (res.statusCode !== 200) {
+          let errData = "";
+          res.on("data", (chunk) => (errData += chunk));
+          res.on("end", () => {
+            error(`[Doubao API] HTTP ${res.statusCode}: ${errData}`);
+            reject(new Error(`HTTP ${res.statusCode}: ${errData}`));
+          });
+          return;
+        }
+
+        let accumulated = "";
+        let buffer = "";
+
+        res.on("data", (chunk: Buffer) => {
+          buffer += chunk.toString();
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
+
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed) continue;
+
+            // Parse SSE events
+            if (trimmed.startsWith("event:")) {
+              info(`[Doubao SSE] Event: ${trimmed.slice(6).trim()}`);
+              continue;
+            }
+
+            if (!trimmed.startsWith("data:")) continue;
+
+            const jsonStr = trimmed.slice(5).trim();
+            if (!jsonStr || jsonStr === "[DONE]") continue;
+
+            try {
+              const event = JSON.parse(jsonStr) as Record<string, unknown>;
+              info(`[Doubao SSE] Event data keys: ${Object.keys(event).join(", ")}`);
+
+              // Try different response formats
+              const choices = event.choices as Array<Record<string, unknown>> | undefined;
+              if (choices && choices.length > 0) {
+                const delta = choices[0].delta as Record<string, unknown> | undefined;
+                const content = delta?.content as string | undefined;
+                if (content) accumulated += content;
+              }
+
+              // Also try direct text field
+              const text = event.text as string | undefined;
+              if (text) accumulated += text;
+
+              // Try message content
+              const message = event.message as Record<string, unknown> | undefined;
+              if (message?.content) accumulated += String(message.content);
+
+            } catch (e) {
+              info(`[Doubao SSE] Parse error: ${e instanceof Error ? e.message : String(e)}`);
+            }
+          }
+        });
+
+        res.on("end", () => {
+          info(`[Doubao SSE] Stream ended, accumulated: ${accumulated.length} chars`);
+          resolve(accumulated || "(empty response)");
+        });
+      });
+
+      req.on("error", (err) => {
+        if (err.name === "AbortError") {
+          reject(new Error("Request cancelled"));
+        } else {
+          reject(err);
+        }
+      });
+
+      if (abortSignal) {
+        abortSignal.addEventListener("abort", () => {
+          req.destroy(new Error("Request cancelled"));
+        });
+      }
+
+      req.write(body);
+      req.end();
+    });
   }
 }
 
