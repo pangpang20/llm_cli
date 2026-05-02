@@ -202,16 +202,25 @@ async function selectProvider(ui?: ReturnType<typeof createUI>): Promise<BasePro
   });
   console.log(chalk.gray("─".repeat(40)));
 
-  const answer = ui
-    ? await ui.prompt(chalk.yellow("Provider (1-4) [1]: "))
-    : await new Promise<string>((resolve, reject) => {
-        const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-        let settled = false;
-        rl.question(chalk.yellow("Provider (1-4) [1]: "), (a) => {
-          if (!settled) { settled = true; rl.close(); resolve(a); }
+  let answer: string;
+  try {
+    answer = ui
+      ? await ui.prompt(chalk.yellow("Provider (1-4) [1]: "))
+      : await new Promise<string>((resolve, reject) => {
+          const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+          let settled = false;
+          rl.question(chalk.yellow("Provider (1-4) [1]: "), (a) => {
+            if (!settled) { settled = true; rl.close(); resolve(a); }
+          });
+          rl.once("close", () => { if (!settled) reject(new Error("EOF")); });
         });
-        rl.once("close", () => { if (!settled) reject(new Error("EOF")); });
-      });
+  } catch (err) {
+    if (err instanceof Error && err.message === "EOF") {
+      console.log(chalk.gray("\nGoodbye!"));
+      process.exit(0);
+    }
+    throw err;
+  }
 
   const num = parseInt(answer.trim(), 10);
   if (isNaN(num) || num < 1 || num > providers.length) {
